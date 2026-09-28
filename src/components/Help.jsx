@@ -5,23 +5,35 @@ const Key = ({ children }) => <kbd className="key">{children}</kbd>
 
 const SECTIONS = [
   {
-    title: 'Pieces',
+    title: 'Mouse',
     rows: [
-      [<Key key="d">Drag</Key>, 'Pick up a piece or module and move it'],
+      [<Key key="lp">Left drag on a piece</Key>, 'Pick up the piece (or its whole module) and move it'],
+      [<Key key="lt">Left drag on the table</Key>, 'Draw a box to select several pieces'],
+      [<Key key="ls">Left drag on a selection</Key>, 'Move all the selected pieces at once'],
+      [<Key key="r">Right drag</Key>, 'Move around the table'],
+      [<Key key="w">Scroll wheel</Key>, 'Zoom in and out'],
+    ],
+  },
+  {
+    title: 'Keyboard',
+    rows: [
       [
         <>
           <Key>←</Key>
           <Key>→</Key>
         </>,
-        'While holding a piece, rotate it 90°',
+        'While holding pieces, rotate them 90°',
       ],
-      [<Key key="t">2nd finger</Key>, 'On touch screens, tap with a second finger to rotate'],
+      [<Key key="sh">Shift</Key>, 'Hold while left clicking or drawing a box to add to the selection'],
+      [<Key key="e">Esc</Key>, 'Clear the selection'],
     ],
   },
   {
-    title: 'Who did what',
+    title: 'Touch screens',
     rows: [
-      [<Key key="c">Hover a piece</Key>, 'Shows who connected it'],
+      [<Key key="tp">Drag a piece</Key>, 'Move it'],
+      [<Key key="tt">Drag the table</Key>, 'Move around the table; pinch to zoom'],
+      [<Key key="t2">2nd finger</Key>, 'While holding a piece, tap with a second finger to rotate'],
     ],
   },
 ]

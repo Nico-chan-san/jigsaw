@@ -69,7 +69,7 @@ export default function RoomsPage() {
     <div className="page">
       <div className="bar">
         <div className="title">
-          <h1>Jigsaw puzzles</h1>
+          <h1>Jigsaws</h1>
         </div>
         <div className="right">
           <Who />

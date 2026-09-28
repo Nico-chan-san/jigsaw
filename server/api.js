@@ -1,9 +1,11 @@
-// Vite plugin that exposes a small JSON/SSE API backed by SQLite (node:sqlite).
+// Vite plugin that exposes a small JSON/WebSocket API backed by SQLite (node:sqlite).
 // Runs inside the Vite dev/preview server, so no separate backend process is needed.
 import { DatabaseSync } from 'node:sqlite'
-import { mkdirSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
+import { attachWebSocket } from './ws.js'
 
 function openDb(file) {
   mkdirSync(dirname(file), { recursive: true })
@@ -52,7 +54,35 @@ function openDb(file) {
       PRIMARY KEY (room_id, user)
     );
   `)
+  migrate(db)
   return db
+}
+
+// Applies server/migrations/NNN-name.sql files in order, once each, tracked with PRAGMA user_version.
+// The CREATE statements above are the baseline schema and must not change; add a migration instead.
+function migrate(db) {
+  const dir = join(dirname(fileURLToPath(import.meta.url)), 'migrations')
+  let files = []
+  try {
+    files = readdirSync(dir).filter((f) => /^\d+-.+\.sql$/.test(f))
+  } catch {
+    return
+  }
+  files.sort((a, b) => parseInt(a) - parseInt(b))
+  const current = db.prepare('PRAGMA user_version').get().user_version
+  for (const f of files) {
+    const v = parseInt(f)
+    if (v <= current) continue
+    db.exec('BEGIN')
+    try {
+      db.exec(readFileSync(join(dir, f), 'utf8'))
+      db.exec(`PRAGMA user_version = ${v}`)
+      db.exec('COMMIT')
+    } catch (e) {
+      db.exec('ROLLBACK')
+      throw new Error(`migration ${f} failed: ${e.message}`)
+    }
+  }
 }
 
 function readJson(req, limit = 40 * 1024 * 1024) {
@@ -85,7 +115,7 @@ function send(res, status, body) {
 
 function createApi(dbFile) {
   const db = openDb(dbFile)
-  const streams = new Map() // roomId -> Set<res>
+  const sockets = new Map() // roomId -> Set<ws>
 
   const q = {
     list: db.prepare(`
@@ -123,6 +153,13 @@ function createApi(dbFile) {
       ON CONFLICT (room_id, user) DO UPDATE SET seconds = seconds + excluded.seconds
       RETURNING seconds`),
     deleteTimes: db.prepare('DELETE FROM times WHERE room_id = ?'),
+    refs: db.prepare('SELECT id, x, y, w, author, created FROM refs WHERE room_id = ? ORDER BY created'),
+    upsertRef: db.prepare(`
+      INSERT INTO refs (id, room_id, x, y, w, author, created) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (room_id, id) DO UPDATE SET x = excluded.x, y = excluded.y, w = excluded.w`),
+    ref: db.prepare('SELECT id, x, y, w, author, created FROM refs WHERE room_id = ? AND id = ?'),
+    deleteRef: db.prepare('DELETE FROM refs WHERE room_id = ? AND id = ?'),
+    deleteRefs: db.prepare('DELETE FROM refs WHERE room_id = ?'),
   }
 
   function tx(fn) {
@@ -136,14 +173,85 @@ function createApi(dbFile) {
     }
   }
 
-  function broadcast(roomId, msg) {
-    const set = streams.get(roomId)
+  function broadcast(roomId, msg, except) {
+    const set = sockets.get(roomId)
     if (!set) return
-    const data = `data: ${JSON.stringify(msg)}\n\n`
-    for (const res of set) res.write(data)
+    const data = JSON.stringify(msg)
+    for (const ws of set) if (ws !== except) ws.send(data)
   }
 
-  return async function middleware(req, res, next) {
+  function saveMoves(roomId, pieces) {
+    tx(() => {
+      for (const p of pieces) q.updatePiece.run(p.x, p.y, p.r, p.g, p.by ?? null, roomId, p.i)
+    })
+  }
+
+  const cleanNote = (b) => ({
+    id: String(b?.id || '').slice(0, 40),
+    x: +b?.x || 0,
+    y: +b?.y || 0,
+    text: String(b?.text || '').slice(0, 2000),
+    author: String(b?.author || '').slice(0, 32),
+  })
+  const cleanRef = (b) => ({
+    id: String(b?.id || '').slice(0, 40),
+    x: +b?.x || 0,
+    y: +b?.y || 0,
+    w: Math.max(1, +b?.w || 0),
+    author: String(b?.author || '').slice(0, 32),
+  })
+
+  // Notes and reference images: live=true only relays (while dragging), otherwise it's saved.
+  function putNote(roomId, b, live) {
+    const n = cleanNote(b)
+    if (!n.id) return null
+    if (live) return { ...n, created: +b.created || 0 }
+    q.upsertNote.run(n.id, roomId, n.x, n.y, n.text, n.author, Date.now())
+    return q.note.get(roomId, n.id)
+  }
+  function putRef(roomId, b, live) {
+    const r = cleanRef(b)
+    if (!r.id) return null
+    if (live) return { ...r, created: +b.created || 0 }
+    q.upsertRef.run(r.id, roomId, r.x, r.y, r.w, r.author, Date.now())
+    return q.ref.get(roomId, r.id)
+  }
+
+  // One socket per open room. Live drag messages ("grab", "live") are only relayed;
+  // "moves" are the final positions after a drop and get persisted.
+  function connect(ws, url) {
+    const roomId = url.searchParams.get('room') || ''
+    const client = url.searchParams.get('client') || ''
+    if (!q.room.get(roomId)) return ws.closed()
+    if (!sockets.has(roomId)) sockets.set(roomId, new Set())
+    sockets.get(roomId).add(ws)
+    ws.handler = (text) => {
+      try {
+        handle(JSON.parse(text))
+      } catch {}
+    }
+    const handle = (m) => {
+      if (m.type === 'moves' && Array.isArray(m.pieces)) {
+        saveMoves(roomId, m.pieces)
+        broadcast(roomId, { type: 'moves', client, pieces: m.pieces }, ws)
+      } else if (m.type === 'grab' || m.type === 'live' || m.type === 'cursor') {
+        broadcast(roomId, { ...m, client }, ws)
+      } else if (m.type === 'note' || m.type === 'ref') {
+        const item = (m.type === 'note' ? putNote : putRef)(roomId, m[m.type], !!m.live)
+        if (item) broadcast(roomId, { type: m.type, client, live: !!m.live, [m.type]: item }, ws)
+      } else if (m.type === 'note-delete' || m.type === 'ref-delete') {
+        const id = String(m.id || '')
+        ;(m.type === 'note-delete' ? q.deleteNote : q.deleteRef).run(roomId, id)
+        broadcast(roomId, { type: m.type, client, id }, ws)
+      }
+    }
+    ws.onclose = () => {
+      sockets.get(roomId)?.delete(ws)
+      broadcast(roomId, { type: 'gone', client })
+    }
+  }
+
+  const middleware = async function middleware(req, res, next) {
     const url = new URL(req.url, 'http://x')
     if (!url.pathname.startsWith('/api/')) return next()
     const parts = url.pathname.slice(5).split('/').filter(Boolean)
@@ -216,6 +324,7 @@ function createApi(dbFile) {
             ...room,
             pieces: q.pieces.all(id),
             notes: q.notes.all(id),
+            refs: q.refs.all(id),
             times: q.times.all(id),
           })
         }
@@ -223,6 +332,7 @@ function createApi(dbFile) {
           tx(() => {
             q.deletePieces.run(id)
             q.deleteNotes.run(id)
+            q.deleteRefs.run(id)
             q.deleteTimes.run(id)
             q.deleteRoom.run(id)
           })
@@ -248,64 +358,13 @@ function createApi(dbFile) {
         return send(res, 200, { seconds })
       }
 
-      if (parts[2] === 'notes' && parts[3] && req.method === 'DELETE') {
-        q.deleteNote.run(id, parts[3])
-        broadcast(id, { type: 'note-delete', client: url.searchParams.get('client'), id: parts[3] })
-        return send(res, 200, { ok: true })
-      }
-
-      if (parts[2] === 'notes' && req.method === 'POST') {
-        const b = await readJson(req)
-        const nid = String(b.id || '').slice(0, 40)
-        if (!nid) return send(res, 400, { error: 'bad request' })
-        q.upsertNote.run(
-          nid,
-          id,
-          +b.x || 0,
-          +b.y || 0,
-          String(b.text || '').slice(0, 2000),
-          String(b.author || '').slice(0, 32),
-          Date.now(),
-        )
-        const note = q.note.get(id, nid)
-        broadcast(id, { type: 'note', client: b.client, note })
-        return send(res, 200, note)
-      }
-
-      if (parts[2] === 'moves' && req.method === 'POST') {
-        const b = await readJson(req)
-        const pieces = Array.isArray(b.pieces) ? b.pieces : []
-        if (!b.live) {
-          tx(() => {
-            for (const p of pieces) q.updatePiece.run(p.x, p.y, p.r, p.g, p.by ?? null, id, p.i)
-          })
-        }
-        broadcast(id, { type: b.live ? 'live' : 'moves', client: b.client, pieces })
-        return send(res, 200, { ok: true })
-      }
-
-      if (parts[2] === 'events' && req.method === 'GET') {
-        res.writeHead(200, {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache, no-transform',
-          Connection: 'keep-alive',
-        })
-        res.write(': hi\n\n')
-        if (!streams.has(id)) streams.set(id, new Set())
-        streams.get(id).add(res)
-        const ping = setInterval(() => res.write(': ping\n\n'), 20000)
-        req.on('close', () => {
-          clearInterval(ping)
-          streams.get(id)?.delete(res)
-        })
-        return
-      }
-
       send(res, 404, { error: 'not found' })
     } catch (e) {
       send(res, 500, { error: String(e.message || e) })
     }
   }
+
+  return { middleware, connect }
 }
 
 export default function sqliteApi(options = {}) {
@@ -313,7 +372,8 @@ export default function sqliteApi(options = {}) {
   let api
   const mount = (server) => {
     api ??= createApi(file)
-    server.middlewares.use(api)
+    server.middlewares.use(api.middleware)
+    if (server.httpServer) attachWebSocket(server.httpServer, '/api/ws', api.connect)
   }
   return {
     name: 'sqlite-api',

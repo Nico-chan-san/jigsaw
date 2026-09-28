@@ -141,3 +141,11 @@ export const Help = (p) => (
     <circle cx="12" cy="16.6" r=".6" fill="currentColor" />
   </Svg>
 )
+
+export const Picture = (p) => (
+  <Svg {...p}>
+    <rect x="4" y="5" width="16" height="14" rx="2" />
+    <circle cx="9" cy="10" r="1.6" />
+    <path d="m4.5 17.5 5-5 3.5 3.5 2.5-2.5 4 4" />
+  </Svg>
+)

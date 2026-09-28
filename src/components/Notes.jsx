@@ -6,7 +6,10 @@ import { Close, Note as NoteIcon } from './icons.jsx'
 // Note size, in units of the jigsaw's piece size.
 const NOTE_W = 2.6
 
-function Note({ note, engine, focus, canEdit, ensureName, onChange, onSave, onDelete }) {
+// Live note drags are sent at most this often (ms).
+const LIVE_MS = 33
+
+function Note({ note, engine, focus, canEdit, ensureName, onChange, onSave, onLive, onDelete }) {
   const area = useRef(null)
   const saveTimer = useRef(0)
 
@@ -25,6 +28,12 @@ function Note({ note, engine, focus, canEdit, ensureName, onChange, onSave, onDe
     el.setPointerCapture(e.pointerId)
     const start = { sx: e.clientX, sy: e.clientY, x: note.x, y: note.y }
     let pos = null
+    let last = 0
+    let timer = 0
+    const live = () => {
+      last = performance.now()
+      onLive({ ...note, ...pos })
+    }
     const move = (ev) => {
       if (!pos && Math.hypot(ev.clientX - start.sx, ev.clientY - start.sy) < 4) return
       pos = {
@@ -32,8 +41,13 @@ function Note({ note, engine, focus, canEdit, ensureName, onChange, onSave, onDe
         y: start.y + (ev.clientY - start.sy) / engine.cam.z,
       }
       onChange(note.id, pos)
+      clearTimeout(timer)
+      const wait = LIVE_MS - (performance.now() - last)
+      if (wait <= 0) live()
+      else timer = setTimeout(live, wait)
     }
     const up = () => {
+      clearTimeout(timer)
       el.removeEventListener('pointermove', move)
       el.removeEventListener('pointerup', up)
       el.removeEventListener('pointercancel', up)
@@ -50,6 +64,7 @@ function Note({ note, engine, focus, canEdit, ensureName, onChange, onSave, onDe
   const edit = (e) => {
     const text = e.target.value
     onChange(note.id, { text })
+    onLive({ ...note, text })
     clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => onSave({ ...note, text }), 400)
   }
@@ -119,6 +134,13 @@ export function NotesLayer({ engine, roomId, name, initial, busRef, createRef, o
   useEffect(() => {
     busRef.current = (msg) => {
       if (msg.type === 'note-delete') return setNotes((ns) => ns.filter((n) => n.id !== msg.id))
+      if (msg.type === 'notes-reset') {
+        // Keep the text of a note that's being edited right now.
+        const editing = document.activeElement?.closest?.('[data-note]')?.dataset.note
+        return setNotes((ns) =>
+          msg.notes.map((n) => (n.id === editing ? { ...n, text: ns.find((o) => o.id === n.id)?.text ?? n.text } : n)),
+        )
+      }
       const incoming = msg.note
       setNotes((ns) => {
         const editing = document.activeElement?.closest?.(`[data-note="${incoming.id}"]`)
@@ -157,6 +179,7 @@ export function NotesLayer({ engine, roomId, name, initial, busRef, createRef, o
 
   const change = (id, patch) => setNotes((ns) => ns.map((n) => (n.id === id ? { ...n, ...patch } : n)))
   const save = (note) => api.saveNote(roomId, note)
+  const live = (note) => api.saveNote(roomId, note, true)
   const remove = (id) => {
     setNotes((ns) => ns.filter((n) => n.id !== id))
     api.deleteNote(roomId, id)
@@ -174,6 +197,7 @@ export function NotesLayer({ engine, roomId, name, initial, busRef, createRef, o
           ensureName={ensureName}
           onChange={change}
           onSave={save}
+          onLive={live}
           onDelete={remove}
         />
       ))}

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
 import { Engine } from '../lib/engine.js'
 import { ThemeButton, navigate, store, useApp } from '../App.jsx'
-import { Fit, Help as HelpIcon, Layers, Minus, Plus, Rooms, Users } from '../components/icons.jsx'
+import { Fit, Help as HelpIcon, Layers, Minus, Picture, Plus, Rooms, Users } from '../components/icons.jsx'
 import Help from '../components/Help.jsx'
 import Players from '../components/Players.jsx'
 import Timers from '../components/Timers.jsx'
@@ -36,6 +36,18 @@ function readColors() {
     dot: s.getPropertyValue('--dot').trim(),
     shadow: s.getPropertyValue('--shadow').trim(),
     line: s.getPropertyValue('--fg').trim(),
+    sel: s.getPropertyValue('--sel').trim(),
+  }
+}
+
+// Reference images used to be kept per browser; these get uploaded to the room once.
+function takeLocalRefs(id) {
+  try {
+    const list = JSON.parse(store.get(`refs:${id}`))
+    store.set(`refs:${id}`, null)
+    return Array.isArray(list) ? list.filter((r) => r && r.id && r.w > 0) : []
+  } catch {
+    return []
   }
 }
 
@@ -43,6 +55,7 @@ export default function Room({ id }) {
   const { name, theme, ensureName, requireName } = useApp()
   const canvas = useRef(null)
   const tip = useRef(null)
+  const cursors = useRef(null)
   const [engine, setEngine] = useState(null)
   const [data, setData] = useState(null)
   const [done, setDone] = useState(false)
@@ -69,7 +82,7 @@ export default function Room({ id }) {
   useEffect(() => {
     let dead = false
     let eng = null
-    let stop = null
+    let sock = null
     ;(async () => {
       try {
         const room = await api.room(id)
@@ -82,10 +95,14 @@ export default function Room({ id }) {
           room,
           image,
           pieces: room.pieces,
+          refs: room.refs || [],
+          overlay: cursors.current,
           user: name,
           guard: ensureName,
           tooltip: tip.current,
-          send: (pieces, live) => api.moves(id, pieces, live),
+          send: (msg) => sock?.send(msg),
+          onRef: (ref, live) => api.saveRef(id, ref, live),
+          onRefDelete: (refId) => api.deleteRef(id, refId),
           onGroups: (g) => {
             setGroups(g)
             setStats(eng.contributors())
@@ -99,12 +116,28 @@ export default function Room({ id }) {
         setDone(eng.isComplete())
         setData({ notes: room.notes || [], times: room.times || [] })
         setEngine(eng)
-        stop = api.events(id, (msg) => {
-          if (msg.type === 'deleted') navigate('/rooms')
-          else if (msg.type === 'time') timeBus.current?.(msg)
-          else if (msg.type === 'note' || msg.type === 'note-delete') noteBus.current?.(msg)
-          else if (msg.pieces) eng.applyRemote(msg.pieces, msg.type === 'live')
+        sock = api.socket(id, {
+          onMessage: (msg) => {
+            if (msg.type === 'deleted') navigate('/rooms')
+            else if (msg.type === 'time') timeBus.current?.(msg)
+            else if (msg.type === 'note' || msg.type === 'note-delete') noteBus.current?.(msg)
+            else if (msg.type === 'ref') eng.remoteRef(msg.ref)
+            else if (msg.type === 'ref-delete') eng.removeRef(msg.id, true)
+            else eng.remoteMessage(msg)
+          },
+          onOpen: async (reconnect) => {
+            if (!reconnect) return
+            const fresh = await api.room(id).catch(() => null)
+            if (!fresh || dead) return
+            eng.resync(fresh.pieces)
+            eng.setRefs(fresh.refs || [])
+            noteBus.current?.({ type: 'notes-reset', notes: fresh.notes || [] })
+          },
         })
+        for (const ref of takeLocalRefs(id)) {
+          eng.remoteRef(ref)
+          api.saveRef(id, ref)
+        }
       } catch {
         if (!dead) {
           if (store.get('lastRoom') === id) store.set('lastRoom', null)
@@ -114,7 +147,7 @@ export default function Room({ id }) {
     })()
     return () => {
       dead = true
-      stop?.()
+      sock?.close()
       eng?.destroy()
     }
   }, [id])
@@ -149,7 +182,7 @@ export default function Room({ id }) {
         </div>
       )}
       <div className="float tl">
-        <button className="icon-btn" onClick={() => navigate('/rooms')} aria-label="Rooms" title="All jigsaw puzzles">
+        <button className="icon-btn" onClick={() => navigate('/rooms')} aria-label="Rooms" title="All jigsaws">
           <Rooms />
         </button>
         <button className={`icon-btn${side ? ' on' : ''}`} onClick={() => setSide((s) => !s)} aria-label="Groups" title="Groups">
@@ -169,6 +202,14 @@ export default function Room({ id }) {
           <Timers roomId={id} name={name} initial={data.times} busRef={timeBus} stopped={done} onTimes={onTimes} />
           <span className="sep" />
           <NoteButton createRef={createNote} />
+          <button
+            className="icon-btn"
+            onClick={() => engine.addRef()}
+            aria-label="Reference image"
+            title="Add the reference image to the board"
+          >
+            <Picture />
+          </button>
         </div>
       )}
       {engine && (
@@ -184,6 +225,7 @@ export default function Room({ id }) {
           onNotes={onNotes}
         />
       )}
+      <canvas ref={cursors} className="cursors" />
       <div className="float tr">
         <button className="icon-btn" onClick={() => setHelp(true)} aria-label="How to play" title="How to play">
           <HelpIcon />

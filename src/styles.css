@@ -12,6 +12,7 @@
   --canvas: #f0f0f0;
   --dot: rgba(0, 0, 0, 0.13);
   --shadow: rgba(0, 0, 0, 0.4);
+  --sel: #2f6fed;
   --radius: 10px;
   color-scheme: light;
 }
@@ -27,6 +28,7 @@
     --canvas: #131313;
     --dot: rgba(255, 255, 255, 0.09);
     --shadow: rgba(0, 0, 0, 0.85);
+    --sel: #5b8cff;
     --note: #f2e45c;
     --field: rgba(245, 245, 245, 0.035);
     --line-strong: rgba(245, 245, 245, 0.32);
@@ -49,6 +51,7 @@
   --canvas: #131313;
   --dot: rgba(255, 255, 255, 0.09);
   --shadow: rgba(0, 0, 0, 0.85);
+  --sel: #5b8cff;
   color-scheme: dark;
 }
 
@@ -608,6 +611,15 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   touch-action: none;
   outline: 0;
 }
+/* Other players' cursors: above the notes, below the panels. */
+.room canvas.cursors {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
 .tip {
   position: absolute;
   top: 0;
@@ -1031,7 +1043,7 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 }
 .help-row {
   display: grid;
-  grid-template-columns: 150px 1fr;
+  grid-template-columns: 190px 1fr;
   align-items: baseline;
   gap: 12px;
 }
