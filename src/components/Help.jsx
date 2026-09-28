@@ -22,7 +22,7 @@ const SECTIONS = [
           <Key>←</Key>
           <Key>→</Key>
         </>,
-        'While holding pieces, rotate them 90°',
+        'While holding pieces, rotate each piece (or module) 90° in place',
       ],
       [<Key key="sh">Shift</Key>, 'Hold while left clicking or drawing a box to add to the selection'],
       [<Key key="e">Esc</Key>, 'Clear the selection'],
@@ -33,7 +33,7 @@ const SECTIONS = [
     rows: [
       [<Key key="tp">Drag a piece</Key>, 'Move it'],
       [<Key key="tt">Drag the table</Key>, 'Move around the table; pinch to zoom'],
-      [<Key key="t2">2nd finger</Key>, 'While holding a piece, tap with a second finger to rotate'],
+      [<Key key="t2">2nd finger</Key>, 'While holding pieces, tap with a second finger to rotate them in place'],
     ],
   },
 ]

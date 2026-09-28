@@ -442,7 +442,7 @@ export class Engine {
     this.camAnim = null
 
     if (this.drag) {
-      if (e.pointerType === 'touch' && e.pointerId !== this.drag.pointer) this.rotate(1)
+      if (e.pointerType === 'touch' && e.pointerId !== this.drag.pointer) this.spin(1)
       return
     }
     if (this.pointers.size === 2) {
@@ -603,7 +603,7 @@ export class Engine {
     const dir = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key]
     if (!dir) return
     e.preventDefault()
-    if (!e.repeat) this.rotate(dir)
+    if (!e.repeat) this.spin(dir)
   }
 
   // Groups only form through grid neighbours, so a piece is connected iff a neighbour shares its group.
@@ -681,6 +681,11 @@ export class Engine {
       r0: ids.map((j) => this.r[j]),
       k: 0,
       angle: 0,
+      // Per piece: the centre of its module and the part of a spin still animating (radians).
+      cx: new Float64Array(ids.length),
+      cy: new Float64Array(ids.length),
+      sa: new Float64Array(ids.length),
+      spinning: false,
     }
     const keep = this.lift && this.lift.ids.length === ids.length && set.has(this.lift.ids[0])
     this.lift = { ids, set, value: keep ? this.lift.value : 0, target: 1, px: wx, py: wy, angle: 0 }
@@ -739,10 +744,44 @@ export class Engine {
     this.lift.py = d.py
   }
 
-  rotate(dir) {
-    if (!this.drag) return
-    this.drag.k += dir
-    this.sendLive(true)
+  // Turns each carried module a quarter around its own centre, leaving the modules where they are.
+  spin(dir) {
+    const d = this.drag
+    if (!d) return
+    const at = new Map(d.ids.map((i, j) => [i, j]))
+    const seen = new Set()
+    for (const i of d.ids) {
+      if (seen.has(i)) continue
+      const js = this.members(this.g[i])
+        .filter((m) => at.has(m))
+        .map((m) => at.get(m))
+      let x0 = Infinity
+      let y0 = Infinity
+      let x1 = -Infinity
+      let y1 = -Infinity
+      for (const j of js) {
+        x0 = Math.min(x0, d.ox[j])
+        y0 = Math.min(y0, d.oy[j])
+        x1 = Math.max(x1, d.ox[j])
+        y1 = Math.max(y1, d.oy[j])
+      }
+      const cx = (x0 + x1) / 2
+      const cy = (y0 + y1) / 2
+      for (const j of js) {
+        seen.add(d.ids[j])
+        const [rx, ry] = rot(d.ox[j] - cx, d.oy[j] - cy, dir)
+        d.ox[j] = cx + rx
+        d.oy[j] = cy + ry
+        d.r0[j] = mod4(d.r0[j] + dir)
+        d.cx[j] = cx
+        d.cy[j] = cy
+        d.sa[j] -= dir * Q
+      }
+    }
+    d.spinning = true
+    this.buildLiftSprite()
+    // Other players get the new offsets as a fresh grab that keeps the current turn.
+    this.send({ type: 'grab', ids: d.ids, ox: d.ox.map(r2), oy: d.oy.map(r2), r0: d.r0, px: r2(d.px), py: r2(d.py), k: d.k })
     this.invalidate(false)
   }
 
@@ -928,7 +967,7 @@ export class Engine {
       const d = { ids: msg.ids, ox: msg.ox, oy: msg.oy, r0: msg.r0 }
       this.remote.set(msg.client, d)
       this.toTop(new Set(d.ids))
-      this.remoteLive(d, msg.px, msg.py, 0, now)
+      this.remoteLive(d, msg.px, msg.py, msg.k | 0, now)
     } else if (msg.type === 'live') {
       const d = this.remote.get(msg.client)
       if (d) this.remoteLive(d, msg.px, msg.py, msg.k | 0, now)
@@ -1188,6 +1227,19 @@ export class Engine {
       d.angle += (target - d.angle) * ease(dt, 45)
       if (Math.abs(target - d.angle) > 0.001) again = true
       else d.angle = target
+      if (d.spinning) {
+        const f = ease(dt, 45)
+        let left = 0
+        for (let j = 0; j < d.sa.length; j++) {
+          d.sa[j] -= d.sa[j] * f
+          left = Math.max(left, Math.abs(d.sa[j]))
+        }
+        if (left > 0.001) again = true
+        else {
+          d.sa.fill(0)
+          d.spinning = false
+        }
+      }
     }
 
     if (this.lift) {
@@ -1341,7 +1393,29 @@ export class Engine {
       by1 = Math.max(by1, y)
     }
 
-    if (l.sprite) {
+    if (d?.spinning) {
+      // Mid spin every piece turns on its own, so draw them one by one instead of the sprite.
+      const R = this.radius
+      const sc = this.spriteScale
+      const e = R * s * cam.z * dpr
+      const ca = Math.cos(d.angle)
+      const sa = Math.sin(d.angle)
+      for (let j = 0; j < d.ids.length; j++) {
+        const a = d.sa[j]
+        const dx = d.ox[j] - d.cx[j]
+        const dy = d.oy[j] - d.cy[j]
+        const ox = d.cx[j] + dx * Math.cos(a) - dy * Math.sin(a)
+        const oy = d.cy[j] + dx * Math.sin(a) + dy * Math.cos(a)
+        const x = l.px + (ox * ca - oy * sa) * s
+        const y = l.py + (ox * sa + oy * ca) * s
+        if (x + R * s < wx0 || x - R * s > wx1 || y + R * s < wy0 || y - R * s > wy1) continue
+        this.drawPiece(lc, d.ids[j], x, y, d.r0[j] * Q + a + d.angle, s, sc)
+        const X = ((x - cam.x) * cam.z + vw / 2) * dpr
+        const Y = ((y - cam.y) * cam.z + vh / 2) * dpr
+        grow(X - e, Y - e)
+        grow(X + e, Y + e)
+      }
+    } else if (l.sprite) {
       const sp = l.sprite
       const a = d ? d.angle : l.angle
       const z = (cam.z * dpr * s) / sp.res
