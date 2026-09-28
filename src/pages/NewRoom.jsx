@@ -5,9 +5,10 @@ import { ThemeButton, navigate, useApp } from '../App.jsx'
 import { Arrow, Back, Upload } from '../components/icons.jsx'
 
 const MIN = 4
-const MAX = 1000
+const MAX = 4000
 const toCount = (v) => Math.round(Math.exp(Math.log(MIN) + ((Math.log(MAX) - Math.log(MIN)) * v) / 100))
-const MAX_SIDE = 2400
+// The stored image's long side: 2400px, or more for big jigsaws so each piece keeps about 55px.
+const maxSide = (cols, rows) => Math.min(4000, Math.max(2400, Math.max(cols, rows) * 55))
 
 function loadImage(file) {
   return new Promise((ok, fail) => {
@@ -83,7 +84,7 @@ export default function NewRoom() {
   const { requireName } = useApp()
   const [img, setImg] = useState(null)
   const [name, setName] = useState('')
-  const [slider, setSlider] = useState(55)
+  const [slider, setSlider] = useState(44)
   const [shape, setShape] = useState('classic')
   const [annoying, setAnnoying] = useState(false)
   const [over, setOver] = useState(false)
@@ -96,11 +97,12 @@ export default function NewRoom() {
 
   const grid = gridFor(toCount(slider), img?.naturalWidth || 4, img?.naturalHeight || 3)
 
-  const pick = async (file) => {
+  // Pasted images get a generic file name like "image.png", so they don't set the title.
+  const pick = async (file, named = true) => {
     if (!file || !file.type.startsWith('image/')) return
     const image = await loadImage(file)
     setImg(image)
-    if (!name)
+    if (named && !name)
       setName(
         file.name
           .replace(/\.[^.]+$/, '')
@@ -108,6 +110,22 @@ export default function NewRoom() {
           .slice(0, 60),
       )
   }
+
+  // Paste an image anywhere on the page. In a text field, text still pastes as usual.
+  const pickRef = useRef(pick)
+  pickRef.current = pick
+  useEffect(() => {
+    const paste = (e) => {
+      const data = e.clipboardData
+      const file = [...(data?.files || [])].find((f) => f.type.startsWith('image/'))
+      if (!file) return
+      if (e.target?.closest?.('input, textarea') && data.types.includes('text/plain')) return
+      e.preventDefault()
+      pickRef.current(file, false)
+    }
+    window.addEventListener('paste', paste)
+    return () => window.removeEventListener('paste', paste)
+  }, [])
 
   const fromLink = async (e) => {
     e.preventDefault()
@@ -141,7 +159,7 @@ export default function NewRoom() {
     if (!(await requireName())) return
     setBusy(true)
     try {
-      const full = encode(img, MAX_SIDE, 0.9)
+      const full = encode(img, maxSide(grid.cols, grid.rows), 0.9)
       const thumb = encode(img, 480, 0.8)
       const room = { cols: grid.cols, rows: grid.rows, width: full.width, height: full.height, shape, seed }
       const { id } = await api.create({
@@ -196,7 +214,7 @@ export default function NewRoom() {
             onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && input.current.click()}
             role="button"
             tabIndex={0}
-            title={img ? 'Change image' : 'Upload image'}
+            title={img ? 'Change image (or paste one)' : 'Upload, drop or paste an image'}
             onDragOver={(e) => {
               e.preventDefault()
               setOver(true)
@@ -211,8 +229,11 @@ export default function NewRoom() {
             {img ? (
               <Preview img={img} {...grid} shape={shape} seed={seed} />
             ) : (
-              <span className="drop-icon">
-                <Upload className="big" />
+              <span className="drop-empty">
+                <span className="drop-icon">
+                  <Upload className="big" />
+                </span>
+                <span className="drop-hint">Click to upload, drop an image here, or just paste one</span>
               </span>
             )}
             <input ref={input} type="file" accept="image/*" onChange={(e) => pick(e.target.files[0])} />

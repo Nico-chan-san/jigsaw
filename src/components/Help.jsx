@@ -25,7 +25,7 @@ const SECTIONS = [
         </>,
         'While holding pieces, rotate each piece (or module) 90° in place',
       ],
-      [<Key key="r">R</Key>, 'While holding pieces, rotate them 90° to the right'],
+      [<Key key="r">R</Key>, 'Turn reactions on or off, with the last one you used'],
       [<Key key="sh">Shift</Key>, 'Hold while clicking a piece, image or note, or drawing a box, to add to the selection'],
       [<Key key="e">Esc</Key>, 'Clear the selection'],
     ],

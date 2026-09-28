@@ -223,6 +223,22 @@ button {
   background: transparent;
 }
 
+.rooms-section + .rooms-section {
+  margin-top: 40px;
+}
+.rooms-section h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 14px;
+  font-size: 14px;
+  font-weight: 500;
+}
+.rooms-section h2 .n {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -462,6 +478,17 @@ button {
 }
 .drop.has:hover {
   border-color: var(--line-strong);
+}
+.drop-empty {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 16px;
+  text-align: center;
+}
+.drop-hint {
+  color: var(--muted);
+  font-size: 13px;
 }
 .drop-icon {
   display: grid;

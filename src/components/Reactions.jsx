@@ -49,6 +49,9 @@ function spawn(layer, emoji, sx, sy) {
 export default function Reactions({ engine, busRef }) {
   const [open, setOpen] = useState(false)
   const [kind, setKind] = useState(null)
+  // The last reaction picked, which R turns back on.
+  const last = useRef(REACTIONS[0].kind)
+  if (kind) last.current = kind
   const wrap = useRef(null)
   const layer = useRef(null)
   const host = engine.canvas.parentElement
@@ -66,6 +69,19 @@ export default function Reactions({ engine, busRef }) {
     }
     return () => (busRef.current = null)
   }, [engine, busRef])
+
+  // R turns reactions on or off.
+  useEffect(() => {
+    const key = (e) => {
+      if (e.key !== 'r' && e.key !== 'R') return
+      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
+      if (e.target?.closest?.('input, textarea, [contenteditable]')) return
+      setOpen(false)
+      setKind((k) => (k ? null : last.current))
+    }
+    window.addEventListener('keydown', key)
+    return () => window.removeEventListener('keydown', key)
+  }, [])
 
   // Close the drop-down on a press anywhere else.
   useEffect(() => {

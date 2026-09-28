@@ -48,6 +48,49 @@ function Who() {
   )
 }
 
+function Card({ r, onDelete }) {
+  return (
+    <a className={`card${r.done ? ' done' : ''}`} href={`#/r/${r.id}`} title={r.name}>
+      <div className="thumb-wrap">
+        <img className="thumb" src={r.thumb} alt="" loading="lazy" />
+        {r.done && (
+          <div className="done-overlay" title="Complete">
+            <span className="done-badge">
+              <Check />
+            </span>
+            <span className="done-time" title="Total time spent">
+              {formatTime(r.seconds || 0)}
+            </span>
+          </div>
+        )}
+      </div>
+      <div className="progress">
+        <div style={{ width: `${Math.round(r.progress * 100)}%` }} />
+      </div>
+      <div className="meta">
+        <span className="name">{r.name}</span>
+        <span className="count">
+          {!r.done && (
+            <span className="time" title="Total time spent">
+              <Clock />
+              {formatTime(r.seconds || 0)}
+            </span>
+          )}
+          <span title="Pieces">{r.n}</span>
+        </span>
+      </div>
+      <button className="icon-btn del" onClick={(e) => onDelete(e, r)} aria-label="Delete" title="Delete jigsaw">
+        <Trash />
+      </button>
+    </a>
+  )
+}
+
+const SECTIONS = [
+  { title: 'In progress', test: (r) => !r.done },
+  { title: 'Finished', test: (r) => r.done },
+]
+
 export default function RoomsPage() {
   const [rooms, setRooms] = useState(null)
 
@@ -76,46 +119,31 @@ export default function RoomsPage() {
           <ThemeButton />
         </div>
       </div>
-      <div className="grid">
-        <button className="card new" onClick={() => navigate('/new')} aria-label="New jigsaw" title="New jigsaw">
-          <Plus />
-        </button>
-        {rooms?.map((r) => (
-          <a key={r.id} className={`card${r.done ? ' done' : ''}`} href={`#/r/${r.id}`} title={r.name}>
-            <div className="thumb-wrap">
-              <img className="thumb" src={r.thumb} alt="" loading="lazy" />
-              {r.done && (
-                <div className="done-overlay" title="Complete">
-                  <span className="done-badge">
-                    <Check />
-                  </span>
-                  <span className="done-time" title="Total time spent">
-                    {formatTime(r.seconds || 0)}
-                  </span>
-                </div>
-              )}
+      <section className="rooms-section">
+        <h2>New</h2>
+        <div className="grid">
+          <button className="card new" onClick={() => navigate('/new')} aria-label="New jigsaw" title="New jigsaw">
+            <Plus />
+          </button>
+        </div>
+      </section>
+      {SECTIONS.map(({ title, test }) => {
+        const list = rooms?.filter(test) || []
+        if (!list.length) return null
+        return (
+          <section key={title} className="rooms-section">
+            <h2>
+              {title}
+              <span className="n">{list.length}</span>
+            </h2>
+            <div className="grid">
+              {list.map((r) => (
+                <Card key={r.id} r={r} onDelete={remove} />
+              ))}
             </div>
-            <div className="progress">
-              <div style={{ width: `${Math.round(r.progress * 100)}%` }} />
-            </div>
-            <div className="meta">
-              <span className="name">{r.name}</span>
-              <span className="count">
-                {!r.done && (
-                  <span className="time" title="Total time spent">
-                    <Clock />
-                    {formatTime(r.seconds || 0)}
-                  </span>
-                )}
-                <span title="Pieces">{r.n}</span>
-              </span>
-            </div>
-            <button className="icon-btn del" onClick={(e) => remove(e, r)} aria-label="Delete" title="Delete jigsaw">
-              <Trash />
-            </button>
-          </a>
-        ))}
-      </div>
+          </section>
+        )
+      })}
     </div>
   )
 }

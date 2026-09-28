@@ -825,8 +825,7 @@ export class Engine {
       return this.removeRef(this.refSel)
     }
     if (!this.drag) return
-    const plainR = (e.key === 'r' || e.key === 'R') && !e.ctrlKey && !e.metaKey && !e.altKey
-    const dir = plainR ? 1 : { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key]
+    const dir = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key]
     if (!dir) return
     e.preventDefault()
     if (!e.repeat) this.spin(dir)
