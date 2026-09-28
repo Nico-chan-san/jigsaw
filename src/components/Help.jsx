@@ -44,6 +44,8 @@ const SECTIONS = [
       ],
       [<Key key="c">C</Key>, 'Fit to screen'],
       [<Key key="h">H</Key>, 'This help'],
+      [<Key key="v">V</Key>, 'View mode: dragging only moves the table'],
+      [<Key key="m">M</Key>, 'Side menu: modules, notes and images'],
       [<Key key="p">P</Key>, 'Players'],
       [<Key key="n">N</Key>, 'New note'],
       [<Key key="i">I</Key>, 'New image'],
@@ -81,7 +83,7 @@ export default function Help({ onClose, closing }) {
         </div>
         <div className="help-body">
           {SECTIONS.map((s) => (
-            <section key={s.title}>
+            <section key={s.title} className={`help-${s.title.toLowerCase()}`}>
               <h2 className="label">{s.title}</h2>
               <dl>
                 {s.rows.map(([k, text], i) => (

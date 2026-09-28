@@ -164,6 +164,8 @@ export class Engine {
     this.pointers = new Map()
     // Pan keys held down right now.
     this.panKeys = new Set()
+    // View mode: the left button (and a finger) moves the table instead of pieces or selecting.
+    this.panMode = false
     this.held = new Map()
     this.moving = new Map()
     this.colors = { bg: '#f4f4f4', dot: 'rgba(0,0,0,.12)', shadow: 'rgba(0,0,0,.35)', sel: '#2f6fed' }
@@ -710,8 +712,8 @@ export class Engine {
       this.invalidate()
       return
     }
-    // Right (or middle) button drags the table.
-    if (e.button === 1 || e.button === 2) return this.startPan(e.pointerId, sx, sy)
+    // Right (or middle) button drags the table, as does any press in view mode.
+    if (e.button === 1 || e.button === 2 || (this.panMode && e.button === 0)) return this.startPan(e.pointerId, sx, sy)
     if (e.button !== 0) return
 
     const [wx, wy] = this.toWorld(sx, sy)
@@ -840,7 +842,7 @@ export class Engine {
     if (this.carry && e.pointerId === this.carry.pointer) this.endCarry()
     if (this.pan && e.pointerId === this.pan.pointer) {
       this.pan = null
-      this.canvas.style.cursor = ''
+      this.canvas.style.cursor = this.panMode ? 'grab' : ''
     }
     if (this.marquee && e.pointerId === this.marquee.pointer) {
       this.marquee = null
@@ -940,6 +942,11 @@ export class Engine {
 
   // Hovering a connected piece shows who connected it.
   hover(sx, sy) {
+    if (this.panMode) {
+      this.canvas.style.cursor = 'grab'
+      this.setHighlight(null)
+      return this.showTip(null)
+    }
     const [wx, wy] = this.toWorld(sx, sy)
     const rh = this.refHit(sx, sy)
     const i = rh && rh.mode !== 'move' ? -1 : this.hit(wx, wy)

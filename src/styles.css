@@ -1045,6 +1045,10 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   padding: calc(var(--u) * 0.1);
   cursor: grab;
   touch-action: none;
+  /* No text selection, loupe or callout from a long press on touch screens; that would steal the drag. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
   border-radius: calc(var(--u) * 0.02);
   background: var(--note);
   color: #1c1a0e;
@@ -1092,9 +1096,29 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   outline: 0;
   background: transparent;
   color: inherit;
+  /* The font size is set to fit the text, see fitText() in Notes.jsx. */
   font-size: calc(var(--u) * 0.25);
-  line-height: 1.35;
+  line-height: 1.25;
+  overflow: hidden;
   resize: none;
+  /* Presses go to the note (to drag it) until it is being edited; a tap starts editing. */
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.note textarea:focus {
+  pointer-events: auto;
+  -webkit-user-select: text;
+  user-select: text;
+}
+/* Without hover the delete button is invisible, so it only takes taps while the note is edited. */
+@media (hover: none) {
+  .note-del {
+    pointer-events: none;
+  }
+  .note:focus-within .note-del {
+    pointer-events: auto;
+  }
 }
 .note-ghost {
   position: fixed;
@@ -1280,7 +1304,7 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 /* ---- help dialog ---- */
 
 .modal.help {
-  width: min(560px, 100%);
+  width: min(760px, 100%);
   max-height: calc(100dvh - 32px);
   gap: 16px;
   padding: 20px 20px 20px 24px;
@@ -1290,11 +1314,13 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   align-items: center;
   justify-content: space-between;
 }
+/* Two columns: mouse and touch on the left, the longer keyboard list on the right. */
 .help-body {
   min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-content: start;
+  gap: 20px 32px;
   margin-right: -8px;
   padding-right: 8px;
   overflow-y: auto;
@@ -1305,17 +1331,20 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   flex-direction: column;
   gap: 8px;
 }
+.help-body .help-keyboard {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+/* Keys in one column, what they do in the next, lined up across the section. */
 .help-body dl {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 8px 12px;
   margin: 0;
 }
 .help-row {
-  display: grid;
-  grid-template-columns: 190px 1fr;
-  align-items: baseline;
-  gap: 12px;
+  display: contents;
 }
 .help-row dt {
   display: flex;
@@ -1339,10 +1368,13 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   white-space: nowrap;
 }
 
-@media (max-width: 480px) {
-  .help-row {
+@media (max-width: 640px) {
+  .help-body {
     grid-template-columns: 1fr;
-    gap: 4px;
+  }
+  .help-body .help-keyboard {
+    grid-column: auto;
+    grid-row: auto;
   }
 }
 
@@ -1385,9 +1417,7 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   padding: 12px 6px 6px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: var(--panel);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: var(--bg);
   box-shadow: 0 8px 24px var(--shadow);
   animation: pop 0.14s ease;
 }
@@ -1587,4 +1617,13 @@ button.link:hover {
   border-color: var(--danger);
   background: var(--danger);
   color: #fff;
+}
+
+/* View mode: presses on notes fall through to the table, which pans. */
+.room.pan-mode .note {
+  pointer-events: none;
+}
+.float.tc .view-btn {
+  cursor: pointer;
+  touch-action: manipulation;
 }

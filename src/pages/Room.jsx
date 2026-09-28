@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
 import { Engine } from '../lib/engine.js'
 import { navigate, store, useApp } from '../App.jsx'
-import { Fit, Help as HelpIcon, Layers, Minus, Picture, Plus, Rooms } from '../components/icons.jsx'
+import { Fit, Hand, Help as HelpIcon, Layers, Minus, Picture, Plus, Rooms } from '../components/icons.jsx'
 import Help from '../components/Help.jsx'
 import Settings from '../components/Settings.jsx'
 import { AccountButton } from '../components/AccountDialog.jsx'
@@ -138,6 +138,8 @@ export default function Room({ id }) {
   const [ready, setReady] = useState(false)
   const [error, setError] = useState(false)
   const [side, setSide] = useState(() => store.get('side') === '1')
+  // View mode: dragging with the left button (or a finger) moves the table, never pieces or notes.
+  const [panMode, setPanMode] = useState(() => store.get('panMode') === '1')
   const [party, setParty] = useState(false)
   const endParty = useCallback(() => setParty(false), [])
 
@@ -258,6 +260,14 @@ export default function Room({ id }) {
   }, [side])
 
   useEffect(() => {
+    store.set('panMode', panMode ? '1' : '0')
+    if (!engine) return
+    engine.panMode = panMode
+    engine.canvas.style.cursor = panMode ? 'grab' : ''
+    engine.setHighlight(null)
+  }, [engine, panMode])
+
+  useEffect(() => {
     store.set('players', players ? '1' : '0')
   }, [players])
 
@@ -265,7 +275,7 @@ export default function Room({ id }) {
     if (error) navigate('/rooms')
   }, [error])
 
-  // H help, P players, N note, I image, + and - zoom, C centres. Arrow keys and WASD pan (see the engine). New notes and images go under the pointer when it's on the table.
+  // H help, V view mode, M side menu (modules, notes, images), P players, N note, I image, + and - zoom, C centres. Arrow keys and WASD pan (see the engine). New notes and images go under the pointer when it's on the table.
   useEffect(() => {
     if (!engine) return
     const key = (e) => {
@@ -279,6 +289,8 @@ export default function Room({ id }) {
       const over = el && !el.closest('.float, .side, .players') ? p : null
       const k = e.key.toLowerCase()
       if (k === 'h') setHelp(true)
+      else if (k === 'v') setPanMode((v) => !v)
+      else if (k === 'm') setSide((s) => !s)
       else if (k === 'p') setPlayers((s) => !s)
       else if (k === 'n') createNote.current?.(over ? over[0] + r.left : null, over ? over[1] + r.top : null)
       else if (k === 'i') (over ? engine.addRef(...over) : engine.addRef())
@@ -293,7 +305,7 @@ export default function Room({ id }) {
   }, [engine])
 
   return (
-    <div className="room">
+    <div className={`room${panMode ? ' pan-mode' : ''}`}>
       <canvas ref={canvas} className="board" tabIndex={0} />
       <div ref={tip} className="tip" />
       {!engine && (
@@ -311,13 +323,26 @@ export default function Room({ id }) {
           className={`icon-btn${side ? ' on' : ''}`}
           onClick={() => setSide((s) => !s)}
           aria-label="Overview"
-          title="Groups, notes and images"
+          aria-keyshortcuts="M"
+          title="Groups, notes and images (M)"
         >
           <Layers />
+          <KeyHint k="M" />
         </button>
       </div>
       {engine && (
         <div className="float tc">
+          <button
+            className={`icon-btn view-btn${panMode ? ' on' : ''}`}
+            onClick={() => setPanMode((v) => !v)}
+            aria-pressed={panMode}
+            aria-label="View mode"
+            aria-keyshortcuts="V"
+            title={panMode ? 'View mode on: dragging moves the table (V)' : 'View mode: drag to move the table (V)'}
+          >
+            <Hand />
+            <KeyHint k="V" />
+          </button>
           <Reactions engine={engine} busRef={reactBus} hint={<KeyHint k="R" />} />
           <span className="sep" />
           <button

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../lib/api.js'
 import { Close, Note as NoteIcon } from './icons.jsx'
@@ -9,6 +9,29 @@ const NOTE_W = 2.6
 // Live note drags are sent at most this often (ms).
 const LIVE_MS = 33
 
+// Note text size range, in piece size units. Text is as big as fits, shrinking as it grows.
+const FONT_MAX = 0.8
+const FONT_MIN = 0.1
+
+// Sets the largest font size at which the text fits the text area, without scrolling or words
+// running over the edge. At the smallest size, long words may break so nothing is ever hidden.
+function fitText(el, unit) {
+  const fits = (f) => {
+    el.style.fontSize = `${f * unit}px`
+    return el.scrollHeight <= el.clientHeight + 1 && el.scrollWidth <= el.clientWidth + 1
+  }
+  el.style.overflowWrap = 'normal'
+  let lo = FONT_MIN
+  let hi = FONT_MAX
+  if (fits(hi)) return
+  for (let i = 0; i < 10; i++) {
+    const mid = (lo + hi) / 2
+    if (fits(mid)) lo = mid
+    else hi = mid
+  }
+  if (!fits(lo)) el.style.overflowWrap = 'anywhere'
+}
+
 function Note({ note, engine, focus, selected, canEdit, author, ensureName, onChange, onSave, onLive, onDelete }) {
   const area = useRef(null)
   const saveTimer = useRef(0)
@@ -16,6 +39,11 @@ function Note({ note, engine, focus, selected, canEdit, author, ensureName, onCh
   useEffect(() => {
     if (focus) area.current?.focus()
   }, [focus])
+
+  const unit = engine.geo.S
+  useLayoutEffect(() => {
+    if (area.current) fitText(area.current, unit)
+  }, [note.text, unit])
 
   // Drag anywhere on the note to move it; a click without moving starts editing.
   // While editing, the text area behaves normally and the note's rim still drags.
