@@ -4,7 +4,7 @@ import qrcode from 'qrcode-generator'
 import { api } from '../lib/api.js'
 import { useApp } from '../App.jsx'
 import { useLinger } from '../lib/linger.js'
-import { Passphrase } from './Account.jsx'
+import { looksLikePassphrase, Passphrase, PassphraseWarning } from './Account.jsx'
 import { Close, Key, User } from './icons.jsx'
 
 const LOCAL = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
@@ -20,17 +20,20 @@ function NameField() {
     else setValue(name || '')
   }
   return (
-    <input
-      className="text"
-      value={value}
-      maxLength={32}
-      placeholder="Your name"
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={save}
-      onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-      aria-label="Name"
-      title="Your name"
-    />
+    <>
+      <input
+        className="text"
+        value={value}
+        maxLength={32}
+        placeholder="Your name"
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => e.key === 'Enter' && !looksLikePassphrase(value) && e.currentTarget.blur()}
+        aria-label="Name"
+        title="Your name"
+      />
+      <PassphraseWarning value={value} />
+    </>
   )
 }
 

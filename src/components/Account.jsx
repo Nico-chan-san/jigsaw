@@ -1,18 +1,56 @@
-import { useEffect, useState } from 'react'
-import { Arrow } from './icons.jsx'
+import { Fragment, useEffect, useState } from 'react'
+import { Arrow, Check, Copy } from './icons.jsx'
 
-// The player's passphrase as four word chips.
+// The player's passphrase as four word chips, with a button that copies it.
 export function Passphrase({ value }) {
+  const text = String(value || '')
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return
+    const t = setTimeout(() => setCopied(false), 1500)
+    return () => clearTimeout(t)
+  }, [copied])
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+    } catch {}
+  }
+
   return (
     <span className="passphrase">
-      {String(value || '')
-        .split(' ')
-        .map((w, i) => (
-          <span key={i} className="word">
-            {w}
-          </span>
-        ))}
+      {/* Real spaces between the chips, so selecting and copying the words keeps them apart. */}
+      {text.split(' ').map((w, i) => (
+        <Fragment key={i}>
+          {i > 0 && ' '}
+          <span className="word">{w}</span>
+        </Fragment>
+      ))}{' '}
+      <button
+        type="button"
+        className={`icon-btn copy-btn${copied ? ' on' : ''}`}
+        onClick={copy}
+        aria-label={copied ? 'Copied' : 'Copy passphrase'}
+        title={copied ? 'Copied' : 'Copy passphrase'}
+      >
+        {copied ? <Check /> : <Copy />}
+      </button>
     </span>
+  )
+}
+
+// True for a name that is four words with spaces between, like a passphrase.
+export const looksLikePassphrase = (name) => /^\s*[a-z]+(\s+[a-z]+){3}\s*$/i.test(name)
+
+// Shown under a name field whose value looks like a passphrase, since names are seen by everyone.
+export function PassphraseWarning({ value }) {
+  if (!looksLikePassphrase(value)) return null
+  return (
+    <p className="modal-error">
+      This looks like a passphrase. Your name is shown to everyone, so never put your passphrase in it.
+    </p>
   )
 }
 
@@ -51,6 +89,11 @@ export default function AccountPrompt({ mode: start, name, player, onSignUp, onL
     setValue('')
     setError('')
   }
+
+  const returning = mode === 'returning'
+  const login = mode === 'login' || returning
+  // Enter won't continue with a name that looks like a passphrase, but the button still will.
+  const blocked = !login && looksLikePassphrase(value)
 
   const submit = async (e) => {
     e.preventDefault()
@@ -91,8 +134,6 @@ export default function AccountPrompt({ mode: start, name, player, onSignUp, onL
     )
   }
 
-  const returning = mode === 'returning'
-  const login = mode === 'login' || returning
   return (
     <div className="modal-bg" onPointerDown={(e) => e.target === e.currentTarget && onCancel()}>
       <form className="modal" onSubmit={submit}>
@@ -115,6 +156,7 @@ export default function AccountPrompt({ mode: start, name, player, onSignUp, onL
               setValue(e.target.value)
               setError('')
             }}
+            onKeyDown={(e) => blocked && e.key === 'Enter' && e.preventDefault()}
             placeholder={login ? 'four word passphrase' : 'Name'}
             maxLength={login ? 200 : 32}
             autoCapitalize="none"
@@ -129,6 +171,7 @@ export default function AccountPrompt({ mode: start, name, player, onSignUp, onL
           </button>
         </div>
         {error && <p className="modal-error">{error}</p>}
+        {!login && !error && <PassphraseWarning value={value} />}
         {returning ? (
           <button type="button" className="link" onClick={fresh} disabled={busy}>
             Not you, or no other device? Start fresh as a new {name}

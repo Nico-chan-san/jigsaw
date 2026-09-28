@@ -121,6 +121,13 @@ export const Check = (p) => (
   </Svg>
 )
 
+export const Copy = (p) => (
+  <Svg {...p}>
+    <rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2" />
+    <path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5" />
+  </Svg>
+)
+
 export const Clock = (p) => (
   <Svg {...p}>
     <circle cx="12" cy="12" r="8.5" />

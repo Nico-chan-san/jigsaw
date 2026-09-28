@@ -1519,17 +1519,26 @@ button.link:hover {
   color: var(--fg);
 }
 .passphrase {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  display: block;
+  margin-bottom: -6px;
+  font-size: 0;
+  line-height: 0;
 }
 .passphrase .word {
+  display: inline-block;
+  margin: 0 6px 6px 0;
+  vertical-align: middle;
   padding: 6px 10px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   background: var(--field);
   font: 500 15px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
-  user-select: all;
+}
+.passphrase .copy-btn {
+  width: 32px;
+  height: 32px;
+  margin-bottom: 6px;
+  vertical-align: middle;
 }
 .settings-more {
   color: var(--muted);
