@@ -727,6 +727,13 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   inset: 0;
   overflow: hidden;
   background: var(--canvas);
+  /* No text highlighting from drags on the table; text fields still select as usual. */
+  -webkit-user-select: none;
+  user-select: none;
+}
+.room input {
+  -webkit-user-select: text;
+  user-select: text;
 }
 .room canvas.board {
   position: absolute;
@@ -1626,4 +1633,151 @@ button.link:hover {
 .float.tc .view-btn {
   cursor: pointer;
   touch-action: manipulation;
+}
+
+/* ---- podium (finished jigsaws) ---- */
+
+.podium-btn {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  width: 104px;
+  height: 72px;
+  padding: 0 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transform: translateX(-50%);
+  transition: transform 0.15s;
+  animation: podium-in 0.5s cubic-bezier(0.3, 1.6, 0.5, 1);
+}
+.podium-btn:hover {
+  transform: translateX(-50%) scale(1.06);
+}
+.podium-icon {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 44px;
+}
+.podium-icon span {
+  display: grid;
+  place-items: start center;
+  width: 22px;
+  padding-top: 2px;
+  border-radius: 4px 4px 0 0;
+  color: #1c1a0e;
+  font: 700 12px/1.2 ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+.podium-icon .p1 {
+  height: 44px;
+  background: #f5c542;
+}
+.podium-icon .p2 {
+  height: 32px;
+  background: #cfd6de;
+}
+.podium-icon .p3 {
+  height: 24px;
+  background: #dd9358;
+}
+@keyframes podium-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(24px) scale(0.6);
+  }
+}
+
+/* The podium itself: a sticker on the table, with the table only slightly blurred behind it. */
+.modal-bg.podium-bg {
+  background: none;
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  cursor: pointer;
+}
+.podium {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  transform: rotate(-3deg);
+  filter: drop-shadow(0 18px 30px rgba(0, 0, 0, 0.35));
+  animation: sticker 0.55s cubic-bezier(0.3, 1.5, 0.5, 1);
+}
+.modal-bg.closing .podium {
+  animation: pop-out 0.16s ease forwards;
+}
+@keyframes sticker {
+  from {
+    opacity: 0;
+    transform: rotate(-12deg) scale(0.4);
+  }
+}
+.stand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: min(150px, 28vw);
+}
+.stand-name {
+  max-width: 100%;
+  padding: 6px 12px;
+  overflow: hidden;
+  border: 4px solid #fff;
+  border-radius: 999px;
+  background: #1c1a0e;
+  color: #fff;
+  font-weight: 700;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.stand-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 12px 8px 16px;
+  border: 5px solid #fff;
+  border-radius: 18px 18px 8px 8px;
+  color: #1c1a0e;
+  font-variant-numeric: tabular-nums;
+}
+.place-1 .stand-block {
+  height: 220px;
+  background: #f5c542;
+}
+.place-2 .stand-block {
+  height: 170px;
+  background: #cfd6de;
+}
+.place-3 .stand-block {
+  height: 135px;
+  background: #dd9358;
+}
+.stand-rank {
+  font: 800 44px/1 ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+.place-1 .stand-rank {
+  font-size: 60px;
+}
+.stand-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.stand-stat svg {
+  width: 14px;
+  height: 14px;
+}
+.room canvas,
+.room img {
+  -webkit-user-drag: none;
 }

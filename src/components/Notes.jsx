@@ -188,6 +188,11 @@ export function NotesLayer({ engine, roomId, me, nameOf, initial, busRef, create
         }
       },
       select: (ids) => setSelected(new Set(ids)),
+      remove: (ids) => {
+        const gone = new Set(ids)
+        setNotes((ns) => ns.filter((n) => !gone.has(n.id)))
+        for (const id of gone) api.deleteNote(roomId, id)
+      },
       focus: (id) => {
         const a = layer.current?.querySelector(`[data-note="${id}"] textarea`)
         if (!a) return

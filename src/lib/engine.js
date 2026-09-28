@@ -173,6 +173,9 @@ export class Engine {
     this.lastLive = 0
     this.viewKey = ''
 
+    // Whether the jigsaw is finished, so finishing it is only noticed once.
+    this.done = this.isComplete()
+
     this.bind()
     this.resize()
     const saved = this.loadCam()
@@ -213,6 +216,8 @@ export class Engine {
         this.send({ type: 'cursor', hide: true })
       },
       menu: (e) => e.preventDefault(),
+      // The browser's own drag and drop (of a page selection, say) never starts from the table.
+      nodrag: (e) => e.preventDefault(),
     }
     c.addEventListener('pointerdown', this.h.down)
     c.addEventListener('pointermove', this.h.move)
@@ -221,6 +226,8 @@ export class Engine {
     c.addEventListener('pointerleave', this.h.leave)
     c.addEventListener('wheel', this.h.wheel, { passive: false })
     c.addEventListener('contextmenu', this.h.menu)
+    this.host = c.parentElement
+    this.host?.addEventListener('dragstart', this.h.nodrag)
     window.addEventListener('keydown', this.h.key)
     window.addEventListener('keyup', this.h.keyup)
     window.addEventListener('blur', this.h.stopPan)
@@ -240,6 +247,7 @@ export class Engine {
     c.removeEventListener('pointerleave', this.h.leave)
     c.removeEventListener('wheel', this.h.wheel)
     c.removeEventListener('contextmenu', this.h.menu)
+    this.host?.removeEventListener('dragstart', this.h.nodrag)
     window.removeEventListener('keydown', this.h.key)
     window.removeEventListener('keyup', this.h.keyup)
     window.removeEventListener('blur', this.h.stopPan)
@@ -482,6 +490,14 @@ export class Engine {
     return this.sel.size + this.selRefs.size + this.selNotes.size
   }
 
+  selectAll() {
+    const pieces = new Set(Array.from({ length: this.n }, (_, i) => i))
+    const refs = new Set(this.refs.map((r) => r.id))
+    const notes = new Set((this.notes?.get() || []).map((n) => n.id))
+    this.selectRef(null)
+    this.setSelection(pieces, refs, notes)
+  }
+
   toggleRef(id) {
     const refs = new Set(this.selRefs)
     refs.has(id) ? refs.delete(id) : refs.add(id)
@@ -694,6 +710,8 @@ export class Engine {
   }
 
   onDown(e) {
+    // A page selection (from Cmd+A in the browser, say) has no business on the table.
+    if (!window.getSelection()?.isCollapsed) window.getSelection().removeAllRanges()
     const [sx, sy] = this.pos(e)
     this.canvas.setPointerCapture(e.pointerId)
     this.pointers.set(e.pointerId, [sx, sy])
@@ -898,12 +916,18 @@ export class Engine {
       this.selectRef(null)
       return
     }
-    if ((e.key === 'Delete' || e.key === 'Backspace') && this.refSel && !this.refDrag) {
+    if ((e.key === 'Delete' || e.key === 'Backspace') && !this.refDrag && !this.drag) {
+      if (!this.refSel && !this.selRefs.size && !this.selNotes.size) return
       e.preventDefault()
-      return this.removeRef(this.refSel)
+      return this.removeSelected()
+    }
+    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key
+    // Cmd/Ctrl+A selects everything on the table, rather than the page's text.
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && key === 'a' && !this.drag) {
+      e.preventDefault()
+      return this.selectAll()
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return
-    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key
     // Arrow keys and WASD move around the table while held, also while carrying pieces.
     if (PAN_KEYS[key]) {
       e.preventDefault()
@@ -1292,10 +1316,17 @@ export class Engine {
     })
     this.emitGroups()
     this.invalidate()
-    if (this.isComplete()) {
+    this.checkComplete()
+  }
+
+  // The moment the last piece goes in, by anyone: tell the page and bring the whole jigsaw into view.
+  checkComplete() {
+    const done = this.isComplete()
+    if (done && !this.done) {
       this.onComplete?.()
       setTimeout(() => this.fit(), 250)
     }
+    this.done = done
   }
 
   dragState() {
@@ -1539,7 +1570,7 @@ export class Engine {
     if (touched.size) this.toTop(touched)
     if (this.sel.size) this.sel = this.withGroups(this.sel)
     this.emitGroups()
-    if (this.isComplete()) this.onComplete?.()
+    this.checkComplete()
     this.invalidate()
   }
 
@@ -1569,6 +1600,17 @@ export class Engine {
     this.selectRef(ref.id)
     this.onRef?.(ref, false)
     this.onRefs?.(this.refs)
+  }
+
+  // Delete or Backspace: removes the selected images and notes (pieces stay).
+  removeSelected() {
+    if (this.guard && !this.guard()) return
+    const refs = new Set(this.selRefs)
+    if (this.refSel) refs.add(this.refSel)
+    const notes = [...this.selNotes]
+    for (const id of refs) this.removeRef(id)
+    if (notes.length) this.notes?.remove(notes)
+    this.setSelection(this.sel)
   }
 
   removeRef(id, remote = false) {

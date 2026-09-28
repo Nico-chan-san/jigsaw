@@ -6,7 +6,8 @@ import { Fit, Hand, Help as HelpIcon, Layers, Minus, Picture, Plus, Rooms } from
 import Help from '../components/Help.jsx'
 import Settings from '../components/Settings.jsx'
 import { AccountButton } from '../components/AccountDialog.jsx'
-import Players from '../components/Players.jsx'
+import Players, { rankPlayers } from '../components/Players.jsx'
+import Podium, { PodiumIcon } from '../components/Podium.jsx'
 import Reactions from '../components/Reactions.jsx'
 import Timers from '../components/Timers.jsx'
 import Celebration from '../components/Celebration.jsx'
@@ -140,8 +141,15 @@ export default function Room({ id }) {
   const [side, setSide] = useState(() => store.get('side') === '1')
   // View mode: dragging with the left button (or a finger) moves the table, never pieces or notes.
   const [panMode, setPanMode] = useState(() => store.get('panMode') === '1')
+  const [podium, setPodium] = useState(false)
+  const closePodium = useCallback(() => setPodium(false), [])
+  const [podiumShown, podiumClosing] = useLinger(podium)
   const [party, setParty] = useState(false)
-  const endParty = useCallback(() => setParty(false), [])
+  // After the celebration, bring up the podium.
+  const endParty = useCallback(() => {
+    setParty(false)
+    setPodium(true)
+  }, [])
 
   useEffect(() => {
     let dead = false
@@ -400,6 +408,18 @@ export default function Room({ id }) {
       </div>
       {helpShown && <Help onClose={closeHelp} closing={helpClosing} />}
       {party && <Celebration onDone={endParty} />}
+      {engine && done && (
+        <button className="podium-btn" onClick={() => setPodium(true)} aria-label="Podium" title="Top players">
+          <PodiumIcon />
+        </button>
+      )}
+      {podiumShown && (
+        <Podium
+          ranked={rankPlayers({ stats, times, notes, nameOf })}
+          closing={podiumClosing}
+          onClose={closePodium}
+        />
+      )}
       <div className="float br">
         <button
           className="icon-btn"

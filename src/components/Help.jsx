@@ -51,7 +51,21 @@ const SECTIONS = [
       [<Key key="i">I</Key>, 'New image'],
       [<Key key="r">R</Key>, 'Reactions'],
       [<Key key="sh">Shift</Key>, 'Add to selection'],
+      [
+        <>
+          <Key>Cmd</Key>
+          <Key>A</Key>
+        </>,
+        'Select everything (Ctrl A on Windows)',
+      ],
       [<Key key="e">Esc</Key>, 'Clear selection'],
+      [
+        <>
+          <Key>Delete</Key>
+          <Key>Backspace</Key>
+        </>,
+        'Remove selected notes and images',
+      ],
     ],
   },
   {
