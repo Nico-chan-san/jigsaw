@@ -9,7 +9,7 @@ const NOTE_W = 2.6
 // Live note drags are sent at most this often (ms).
 const LIVE_MS = 33
 
-function Note({ note, engine, focus, canEdit, ensureName, onChange, onSave, onLive, onDelete }) {
+function Note({ note, engine, focus, selected, canEdit, ensureName, onChange, onSave, onLive, onDelete }) {
   const area = useRef(null)
   const saveTimer = useRef(0)
 
@@ -24,6 +24,10 @@ function Note({ note, engine, focus, canEdit, ensureName, onChange, onSave, onLi
     if (e.target === area.current && document.activeElement === area.current) return
     e.preventDefault()
     if (!ensureName()) return
+    // Shift-click adds the note to the selection; dragging a selected note carries the whole selection.
+    if (e.shiftKey) return engine.toggleNote(note.id)
+    if (selected && engine.selCount > 1) return engine.grabSelection(e, { note: note.id })
+    if (engine.selCount && !selected) engine.setSelection(new Set())
     const el = e.currentTarget
     el.setPointerCapture(e.pointerId)
     const start = { sx: e.clientX, sy: e.clientY, x: note.x, y: note.y }
@@ -71,7 +75,7 @@ function Note({ note, engine, focus, canEdit, ensureName, onChange, onSave, onLi
 
   return (
     <div
-      className="note"
+      className={`note${selected ? ' sel' : ''}`}
       style={{ left: note.x, top: note.y }}
       data-note={note.id}
       onPointerMove={(e) => {
@@ -110,7 +114,10 @@ function Note({ note, engine, focus, canEdit, ensureName, onChange, onSave, onLi
 export function NotesLayer({ engine, roomId, name, initial, busRef, createRef, onNotes, ensureName, requireName }) {
   const [notes, setNotes] = useState(initial)
   const [focusId, setFocusId] = useState(null)
+  const [selected, setSelected] = useState(() => new Set())
   const layer = useRef(null)
+  const latest = useRef(notes)
+  latest.current = notes
   const S = engine.geo.S
 
   useEffect(() => {
@@ -130,6 +137,38 @@ export function NotesLayer({ engine, roomId, name, initial, busRef, createRef, o
       el.removeEventListener('wheel', wheel)
     }
   }, [engine])
+
+  // Lets the engine select notes with the selection box and carry them along with a drag.
+  useEffect(() => {
+    engine.notes = {
+      get: () =>
+        latest.current.map((n) => ({
+          id: n.id,
+          x: n.x,
+          y: n.y,
+          w: NOTE_W * S,
+          h: layer.current?.querySelector(`[data-note="${n.id}"]`)?.offsetHeight || S,
+        })),
+      // send: null moves locally only, 'live' also relays, 'save' also stores.
+      move: (list, send) => {
+        const at = new Map(list.map((p) => [p.id, p]))
+        setNotes((ns) => ns.map((n) => (at.has(n.id) ? { ...n, x: at.get(n.id).x, y: at.get(n.id).y } : n)))
+        if (!send) return
+        for (const n of latest.current) {
+          const p = at.get(n.id)
+          if (p) api.saveNote(roomId, { ...n, x: p.x, y: p.y }, send === 'live')
+        }
+      },
+      select: (ids) => setSelected(new Set(ids)),
+      focus: (id) => {
+        const a = layer.current?.querySelector(`[data-note="${id}"] textarea`)
+        if (!a) return
+        a.focus()
+        a.setSelectionRange(a.value.length, a.value.length)
+      },
+    }
+    return () => (engine.notes = null)
+  }, [engine, roomId, S])
 
   useEffect(() => {
     busRef.current = (msg) => {
@@ -182,6 +221,7 @@ export function NotesLayer({ engine, roomId, name, initial, busRef, createRef, o
   const live = (note) => api.saveNote(roomId, note, true)
   const remove = (id) => {
     setNotes((ns) => ns.filter((n) => n.id !== id))
+    if (engine.selNotes.has(id)) engine.toggleNote(id)
     api.deleteNote(roomId, id)
   }
 
@@ -193,6 +233,7 @@ export function NotesLayer({ engine, roomId, name, initial, busRef, createRef, o
           note={n}
           engine={engine}
           focus={focusId === n.id}
+          selected={selected.has(n.id)}
           canEdit={!!name}
           ensureName={ensureName}
           onChange={change}

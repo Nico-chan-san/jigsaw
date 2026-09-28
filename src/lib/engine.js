@@ -79,8 +79,14 @@ export class Engine {
     this.backs = new Array(n)
     this.flips = new Map()
     this.hl = null
-    // Selected pieces; always whole groups.
+    // Selected pieces (always whole groups), reference images and notes, by id.
     this.sel = new Set()
+    this.selRefs = new Set()
+    this.selNotes = new Set()
+    // Set by the notes layer: { get() -> [{ id, x, y, w, h }], move(list, send), select(ids), focus(id) }.
+    this.notes = null
+    // Images and notes riding along with a drag: { pointer, wx, wy, sx0, sy0, moved, note, refs, notes }.
+    this.carry = null
     this.marquee = null
     // Other players' drags in progress: client -> { ids, ox, oy, r0 }.
     this.remote = new Map()
@@ -380,9 +386,123 @@ export class Engine {
     return out
   }
 
-  setSelection(set) {
+  setSelection(set, refs = new Set(), notes = new Set()) {
     this.sel = set
+    this.selRefs = refs
+    const same = notes.size === this.selNotes.size && [...notes].every((id) => this.selNotes.has(id))
+    this.selNotes = notes
+    if (!same) this.notes?.select(notes)
     this.invalidate()
+  }
+
+  get selCount() {
+    return this.sel.size + this.selRefs.size + this.selNotes.size
+  }
+
+  toggleRef(id) {
+    const refs = new Set(this.selRefs)
+    refs.has(id) ? refs.delete(id) : refs.add(id)
+    this.setSelection(this.sel, refs, this.selNotes)
+  }
+
+  toggleNote(id) {
+    const notes = new Set(this.selNotes)
+    notes.has(id) ? notes.delete(id) : notes.add(id)
+    this.setSelection(this.sel, this.selRefs, notes)
+  }
+
+  // Picks up the whole selection: its pieces as a normal drag, with images and notes riding along.
+  // Also called by the notes layer when a selected note is dragged, hence the pointer capture.
+  grabSelection(e, from = {}) {
+    const [sx, sy] = this.pos(e)
+    const [wx, wy] = this.toWorld(sx, sy)
+    if (!this.pointers.has(e.pointerId)) {
+      this.canvas.setPointerCapture(e.pointerId)
+      this.pointers.set(e.pointerId, [sx, sy])
+    }
+    const now = performance.now()
+    const ids = [...this.withGroups(this.sel)].filter((j) => !(this.held.get(j) > now))
+    if (ids.length) {
+      this.startDrag(ids, wx, wy, e.pointerId, sx, sy)
+      // Only a press on a piece can be a click that flips it.
+      if (!from.piece) this.drag.moved = true
+    }
+    const notes = this.notes?.get().filter((n) => this.selNotes.has(n.id)) || []
+    this.carry = {
+      pointer: e.pointerId,
+      wx: this.drag ? this.drag.px : wx,
+      wy: this.drag ? this.drag.py : wy,
+      sx0: sx,
+      sy0: sy,
+      moved: false,
+      note: from.note || null,
+      refs: this.refs.filter((r) => this.selRefs.has(r.id)).map((r) => ({ id: r.id, x: r.x, y: r.y })),
+      notes: notes.map((n) => ({ id: n.id, x: n.x, y: n.y })),
+    }
+    // Carried images go on top, like a lifted piece.
+    this.refs = this.refs.filter((r) => !this.selRefs.has(r.id)).concat(this.refs.filter((r) => this.selRefs.has(r.id)))
+    this.invalidate()
+  }
+
+  carryAt(wx, wy) {
+    const c = this.carry
+    const dx = wx - c.wx
+    const dy = wy - c.wy
+    return {
+      refs: c.refs.map((r) => ({ id: r.id, x: r.x + dx, y: r.y + dy })),
+      notes: c.notes.map((n) => ({ id: n.id, x: n.x + dx, y: n.y + dy })),
+    }
+  }
+
+  moveCarry(wx, wy) {
+    const c = this.carry
+    if (!c) return
+    c.at = [wx, wy]
+    const { refs, notes } = this.carryAt(wx, wy)
+    for (const p of refs) {
+      const ref = this.refs.find((r) => r.id === p.id)
+      if (ref) Object.assign(ref, p)
+    }
+    if (notes.length) this.notes?.move(notes, null)
+    this.sendCarry()
+    this.invalidate(!!refs.length)
+  }
+
+  sendCarry(force) {
+    const now = performance.now()
+    clearTimeout(this.carryTimer)
+    const c = this.carry
+    if (!c?.at) return
+    if (force || now - (this.lastCarry || 0) >= LIVE_MS) {
+      this.lastCarry = now
+      const { refs, notes } = this.carryAt(...c.at)
+      for (const p of refs) {
+        const ref = this.refs.find((r) => r.id === p.id)
+        if (ref) this.onRef?.(ref, true)
+      }
+      if (notes.length) this.notes?.move(notes, 'live')
+    } else {
+      this.carryTimer = setTimeout(() => this.sendCarry(true), LIVE_MS - (now - this.lastCarry))
+    }
+  }
+
+  endCarry() {
+    const c = this.carry
+    this.carry = null
+    clearTimeout(this.carryTimer)
+    if (!c) return
+    // A click on a selected note without moving edits it instead.
+    if (!c.moved && c.note) {
+      this.setSelection(new Set())
+      return this.notes?.focus(c.note)
+    }
+    if (!c.at) return
+    const { refs, notes } = this.carryAt(...c.at)
+    for (const p of refs) {
+      const ref = this.refs.find((r) => r.id === p.id)
+      if (ref) this.onRef?.(ref, false)
+    }
+    if (notes.length) this.notes?.move(notes, 'save')
   }
 
   makeSprite(i) {
@@ -526,24 +646,38 @@ export class Engine {
         const next = new Set(this.sel)
         const on = !next.has(i)
         for (const j of grp) on ? next.add(j) : next.delete(j)
-        return this.setSelection(next)
+        return this.setSelection(next, this.selRefs, this.selNotes)
       }
-      let ids
-      if (this.sel.has(i)) ids = [...this.withGroups(this.sel)].filter((j) => !(this.held.get(j) > performance.now()))
-      else {
-        if (this.sel.size) this.setSelection(new Set())
-        ids = this.members(this.g[i])
-      }
-      return this.startDrag(ids, wx, wy, e.pointerId, sx, sy)
+      if (this.sel.has(i)) return this.grabSelection(e, { piece: true })
+      if (this.selCount) this.setSelection(new Set())
+      return this.startDrag(this.members(this.g[i]), wx, wy, e.pointerId, sx, sy)
+    }
+    if (rh?.mode === 'move' && e.shiftKey) {
+      if (this.guard && !this.guard()) return
+      return this.toggleRef(rh.ref.id)
+    }
+    if (rh?.mode === 'move' && this.selRefs.has(rh.ref.id) && this.selCount > 1) {
+      if (this.guard && !this.guard()) return
+      this.selectRef(null)
+      return this.grabSelection(e)
     }
     if (rh) return this.startRefDrag(rh, e.pointerId, wx, wy)
     if (e.pointerType === 'touch') return this.startPan(e.pointerId, sx, sy)
 
     // Left drag on the empty table draws a selection box; shift adds to the selection.
     this.selectRef(null)
-    const base = e.shiftKey ? new Set(this.sel) : new Set()
-    this.marquee = { pointer: e.pointerId, sx0: sx, sy0: sy, sx, sy, base }
-    if (!e.shiftKey && this.sel.size) this.setSelection(new Set())
+    const keep = e.shiftKey
+    this.marquee = {
+      pointer: e.pointerId,
+      sx0: sx,
+      sy0: sy,
+      sx,
+      sy,
+      base: keep ? new Set(this.sel) : new Set(),
+      baseRefs: keep ? new Set(this.selRefs) : new Set(),
+      baseNotes: keep ? new Set(this.selNotes) : new Set(),
+    }
+    if (!keep && this.selCount) this.setSelection(new Set())
   }
 
   startPan(pointer, sx, sy) {
@@ -557,6 +691,14 @@ export class Engine {
     const [sx, sy] = this.pos(e)
     if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, [sx, sy])
 
+    const c = this.carry
+    if (c && e.pointerId === c.pointer) {
+      if (Math.hypot(sx - c.sx0, sy - c.sy0) > CLICK_PX) c.moved = true
+      if (!this.drag) {
+        this.moveCarry(...this.toWorld(sx, sy))
+        return
+      }
+    }
     if (this.drag && e.pointerId === this.drag.pointer) {
       const d = this.drag
       d.sx = sx
@@ -607,6 +749,7 @@ export class Engine {
       this.drop()
       if (click) this.flip(d.ids[0])
     }
+    if (this.carry && e.pointerId === this.carry.pointer) this.endCarry()
     if (this.pan && e.pointerId === this.pan.pointer) {
       this.pan = null
       this.canvas.style.cursor = ''
@@ -637,7 +780,13 @@ export class Engine {
     }
     const next = this.withGroups(hit)
     for (const i of m.base) next.add(i)
-    this.setSelection(next)
+    // Images and notes count when their centre is inside the box, like pieces.
+    const inside = (x, y) => x >= ax && x <= bx && y >= ay && y <= by
+    const refs = new Set(m.baseRefs)
+    for (const r of this.refs) if (inside(r.x, r.y)) refs.add(r.id)
+    const notes = new Set(m.baseNotes)
+    for (const n of this.notes?.get() || []) if (inside(n.x + n.w / 2, n.y + n.h / 2)) notes.add(n.id)
+    this.setSelection(next, refs, notes)
   }
 
   onWheel(e) {
@@ -653,7 +802,7 @@ export class Engine {
   onKey(e) {
     if (e.target?.closest?.('input, textarea, [contenteditable]')) return
     if (e.key === 'Escape' && !this.drag) {
-      if (this.sel.size) this.setSelection(new Set())
+      if (this.selCount) this.setSelection(new Set())
       this.selectRef(null)
       return
     }
@@ -810,6 +959,7 @@ export class Engine {
     d.py = Math.min(y1, Math.max(y0, wy))
     this.lift.px = d.px
     this.lift.py = d.py
+    this.moveCarry(d.px, d.py)
   }
 
   // Turns each carried module a quarter around its own centre, leaving the modules where they are.
@@ -1139,6 +1289,7 @@ export class Engine {
     if (!remote && this.guard && !this.guard()) return
     this.refs = this.refs.filter((r) => r.id !== id)
     if (this.refSel === id) this.refSel = null
+    this.selRefs.delete(id)
     if (this.refDrag?.ref.id === id) this.refDrag = null
     if (!remote) this.onRefDelete?.(id)
     this.invalidate()
@@ -1146,7 +1297,7 @@ export class Engine {
 
   // Another player added, moved or resized an image.
   remoteRef(ref) {
-    if (this.refDrag?.ref.id === ref.id) return
+    if (this.refDrag?.ref.id === ref.id || this.carry?.refs.some((r) => r.id === ref.id)) return
     const cur = this.refs.find((r) => r.id === ref.id)
     if (cur) Object.assign(cur, ref)
     else this.refs.push(ref)
@@ -1157,6 +1308,7 @@ export class Engine {
     const dragging = this.refDrag?.ref
     this.refs = refs.map((r) => (dragging && r.id === dragging.id ? dragging : r))
     if (this.refSel && !this.refs.some((r) => r.id === this.refSel)) this.refSel = null
+    for (const id of this.selRefs) if (!this.refs.some((r) => r.id === id)) this.selRefs.delete(id)
     this.invalidate()
   }
 
@@ -1217,7 +1369,7 @@ export class Engine {
     if (rh.mode === 'del') return this.removeRef(ref.id)
     if (this.guard && !this.guard()) return
     this.selectRef(ref.id)
-    if (this.sel.size) this.setSelection(new Set())
+    if (this.selCount) this.setSelection(new Set())
     // Bring to front.
     this.refs = this.refs.filter((r) => r !== ref).concat(ref)
     const [w, h] = this.refSize(ref)
@@ -1436,8 +1588,9 @@ export class Engine {
       if (ref.x + w / 2 < wx0 || ref.x - w / 2 > wx1 || ref.y + h / 2 < wy0 || ref.y - h / 2 > wy1) continue
       ctx.setTransform(z, 0, 0, z, ((ref.x - cam.x) * cam.z + vw / 2) * dpr, ((ref.y - cam.y) * cam.z + vh / 2) * dpr)
       ctx.drawImage(this.refImg, -w / 2, -h / 2, w, h)
-      ctx.lineWidth = dpr / z
-      ctx.strokeStyle = this.colors.dot
+      const on = this.selRefs.has(ref.id)
+      ctx.lineWidth = ((on ? 3 : 1) * dpr) / z
+      ctx.strokeStyle = on ? this.colors.sel : this.colors.dot
       ctx.strokeRect(-w / 2, -h / 2, w, h)
     }
 

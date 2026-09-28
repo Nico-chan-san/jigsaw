@@ -844,6 +844,10 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   box-shadow: 0 calc(var(--u) * 0.05) calc(var(--u) * 0.18) rgba(0, 0, 0, 0.25);
   pointer-events: auto;
 }
+.note.sel {
+  outline: calc(var(--u) * 0.04) solid var(--sel);
+  outline-offset: calc(var(--u) * 0.02);
+}
 .note-del {
   position: absolute;
   top: calc(var(--u) * 0.05);
