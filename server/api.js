@@ -4,8 +4,10 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto'
+import { networkInterfaces } from 'node:os'
 import { attachWebSocket } from './ws.js'
+import { WORDS } from './words.js'
 
 function openDb(file) {
   mkdirSync(dirname(file), { recursive: true })
@@ -107,6 +109,19 @@ function readJson(req, limit = 40 * 1024 * 1024) {
   })
 }
 
+// Passphrases are compared case and spacing blind: "Otter  maple-moon Jolly" is "otter maple moon jolly".
+const normalize = (s) => String(s || '').toLowerCase().split(/[^a-z]+/).filter(Boolean).join(' ')
+const hashSecret = (s) => createHash('sha256').update(normalize(s)).digest('hex')
+const cleanName = (s) => String(s || '').trim().slice(0, 32)
+
+// The machine's first network address, so a phone on the same network can open the app.
+function lanAddress() {
+  for (const list of Object.values(networkInterfaces())) {
+    for (const a of list || []) if (a.family === 'IPv4' && !a.internal) return a.address
+  }
+  return null
+}
+
 function send(res, status, body) {
   res.statusCode = status
   res.setHeader('Content-Type', 'application/json')
@@ -119,19 +134,19 @@ function createApi(dbFile) {
 
   const q = {
     list: db.prepare(`
-      SELECT r.id, r.name, r.created, r.cols, r.rows, r.shape, r.thumb,
+      SELECT r.id, r.name, r.created, r.cols, r.rows, r.shape, r.thumb, r.owner,
              COUNT(p.idx) AS n, COUNT(DISTINCT p.g) AS groups,
              (SELECT COALESCE(SUM(t.seconds), 0) FROM times t WHERE t.room_id = r.id) AS seconds
       FROM rooms r LEFT JOIN pieces p ON p.room_id = r.id
       GROUP BY r.id ORDER BY r.created DESC`),
     room: db.prepare(
-      'SELECT id, name, created, cols, rows, shape, seed, width, height, annoying FROM rooms WHERE id = ?',
+      'SELECT id, name, created, cols, rows, shape, seed, width, height, annoying, owner FROM rooms WHERE id = ?',
     ),
     image: db.prepare('SELECT image, image_type FROM rooms WHERE id = ?'),
     pieces: db.prepare('SELECT idx AS i, x, y, r, g, by, f FROM pieces WHERE room_id = ? ORDER BY idx'),
     insertRoom: db.prepare(`
-      INSERT INTO rooms (id, name, created, cols, rows, shape, seed, width, height, image, image_type, thumb, annoying)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+      INSERT INTO rooms (id, name, created, cols, rows, shape, seed, width, height, image, image_type, thumb, annoying, owner)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     insertPiece: db.prepare(
       'INSERT INTO pieces (room_id, idx, x, y, r, g, by, f) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     ),
@@ -160,6 +175,52 @@ function createApi(dbFile) {
     ref: db.prepare('SELECT id, x, y, w, author, created FROM refs WHERE room_id = ? AND id = ?'),
     deleteRef: db.prepare('DELETE FROM refs WHERE room_id = ? AND id = ?'),
     deleteRefs: db.prepare('DELETE FROM refs WHERE room_id = ?'),
+    player: db.prepare('SELECT id, name FROM players WHERE id = ?'),
+    playerBySecret: db.prepare('SELECT id, name FROM players WHERE secret = ?'),
+    unclaimed: db.prepare('SELECT id, name FROM players WHERE name = ? AND secret IS NULL ORDER BY created LIMIT 1'),
+    secretTaken: db.prepare('SELECT 1 FROM players WHERE secret = ?'),
+    named: db.prepare('SELECT 1 FROM players WHERE name = ? LIMIT 1'),
+    insertPlayer: db.prepare('INSERT INTO players (id, name, secret, created) VALUES (?, ?, ?, ?)'),
+    setSecret: db.prepare('UPDATE players SET secret = ? WHERE id = ?'),
+    renamePlayer: db.prepare('UPDATE players SET name = ? WHERE secret = ? RETURNING id, name'),
+    // Everyone who has left a mark on a room, so their names can be shown.
+    roomPlayers: db.prepare(`
+      SELECT id, name FROM players WHERE id IN (
+        SELECT "by" FROM pieces WHERE room_id = ?1
+        UNION SELECT author FROM notes WHERE room_id = ?1
+        UNION SELECT author FROM refs WHERE room_id = ?1
+        UNION SELECT user FROM times WHERE room_id = ?1
+      )`),
+  }
+
+  // A fresh passphrase of four words that no other player has.
+  function newSecret() {
+    for (;;) {
+      const words = Array.from({ length: 4 }, () => WORDS[randomInt(WORDS.length)]).join(' ')
+      if (!q.secretTaken.get(hashSecret(words))) return words
+    }
+  }
+
+  function createPlayer(name) {
+    const id = randomBytes(8).toString('hex')
+    const passphrase = newSecret()
+    q.insertPlayer.run(id, name, hashSecret(passphrase), Date.now())
+    return { id, name, passphrase }
+  }
+
+  // Failed logins per address, to keep passphrases from being guessed: ip -> { n, t }.
+  const failures = new Map()
+  const LOGIN_TRIES = 20
+  const LOGIN_WINDOW = 10 * 60 * 1000
+  const blocked = (ip) => {
+    const f = failures.get(ip)
+    if (f && Date.now() - f.t > LOGIN_WINDOW) failures.delete(ip)
+    return (failures.get(ip)?.n || 0) >= LOGIN_TRIES
+  }
+  const failed = (ip) => {
+    const f = failures.get(ip) || { n: 0, t: Date.now() }
+    f.n++
+    failures.set(ip, f)
   }
 
   function tx(fn) {
@@ -180,9 +241,22 @@ function createApi(dbFile) {
     for (const ws of set) if (ws !== except) ws.send(data)
   }
 
+  // Only real player ids are stored as authors; anything else (such as a name sent by a page from
+  // before players) is dropped.
+  const playerId = (v) => (v && q.player.get(String(v)) ? String(v) : null)
+
   function saveMoves(roomId, pieces) {
+    const known = new Map()
+    const by = (v) => {
+      if (v == null) return null
+      if (!known.has(v)) known.set(v, playerId(v))
+      return known.get(v)
+    }
     tx(() => {
-      for (const p of pieces) q.updatePiece.run(p.x, p.y, p.r, p.g, p.by ?? null, p.f == null ? null : p.f ? 1 : 0, roomId, p.i)
+      for (const p of pieces) {
+        p.by = by(p.by)
+        q.updatePiece.run(p.x, p.y, p.r, p.g, p.by, p.f == null ? null : p.f ? 1 : 0, roomId, p.i)
+      }
     })
   }
 
@@ -206,6 +280,7 @@ function createApi(dbFile) {
     const n = cleanNote(b)
     if (!n.id) return null
     if (live) return { ...n, created: +b.created || 0 }
+    n.author = playerId(n.author) || ''
     q.upsertNote.run(n.id, roomId, n.x, n.y, n.text, n.author, Date.now())
     return q.note.get(roomId, n.id)
   }
@@ -213,6 +288,7 @@ function createApi(dbFile) {
     const r = cleanRef(b)
     if (!r.id) return null
     if (live) return { ...r, created: +b.created || 0 }
+    r.author = playerId(r.author) || ''
     q.upsertRef.run(r.id, roomId, r.x, r.y, r.w, r.author, Date.now())
     return q.ref.get(roomId, r.id)
   }
@@ -225,13 +301,22 @@ function createApi(dbFile) {
     if (!q.room.get(roomId)) return ws.closed()
     if (!sockets.has(roomId)) sockets.set(roomId, new Set())
     sockets.get(roomId).add(ws)
+    // Tell the room who just arrived, so their name shows on whatever they do.
+    const player = q.player.get(url.searchParams.get('player') || '')
+    ws.player = player || null
+    if (player) broadcast(roomId, { type: 'player', client, player: { id: player.id, name: player.name } }, ws)
     ws.handler = (text) => {
       try {
         handle(JSON.parse(text))
       } catch {}
     }
     const handle = (m) => {
-      if (m.type === 'moves' && Array.isArray(m.pieces)) {
+      // The player on this socket logged in, out or signed up.
+      if (m.type === 'hello') {
+        const p = q.player.get(String(m.player || ''))
+        ws.player = p || null
+        if (p) broadcast(roomId, { type: 'player', client, player: { id: p.id, name: p.name } }, ws)
+      } else if (m.type === 'moves' && Array.isArray(m.pieces)) {
         saveMoves(roomId, m.pieces)
         broadcast(roomId, { type: 'moves', client, pieces: m.pieces }, ws)
       } else if (m.type === 'grab' || m.type === 'live' || m.type === 'cursor') {
@@ -276,6 +361,56 @@ function createApi(dbFile) {
         return res.end(buf)
       }
 
+      // /api/lan: where phones on the same network can reach this server.
+      if (parts[0] === 'lan' && req.method === 'GET') return send(res, 200, { address: lanAddress() })
+
+      // /api/players: sign up with a name, log in with a passphrase, rename.
+      if (parts[0] === 'players' && req.method === 'POST') {
+        const b = await readJson(req, 64 * 1024)
+        if (parts.length === 1) {
+          const name = cleanName(b.name)
+          if (!name) return send(res, 400, { error: 'name required' })
+          return send(res, 200, createPlayer(name))
+        }
+        // Browsers from before passphrases only know a name: the first to ask gets the player made
+        // for that name. Once it has a passphrase, other browsers with the name must log in with it
+        // (409), so one person's devices don't split into separate players.
+        if (parts[1] === 'claim') {
+          const name = cleanName(b.name)
+          if (!name) return send(res, 400, { error: 'name required' })
+          const old = q.unclaimed.get(name)
+          if (!old) {
+            if (q.named.get(name)) return send(res, 409, { error: 'taken' })
+            return send(res, 200, createPlayer(name))
+          }
+          const passphrase = newSecret()
+          q.setSecret.run(hashSecret(passphrase), old.id)
+          return send(res, 200, { id: old.id, name: old.name, passphrase })
+        }
+        if (parts[1] === 'login') {
+          const ip = req.socket.remoteAddress || ''
+          if (blocked(ip)) return send(res, 429, { error: 'too many tries, wait a few minutes' })
+          const p = normalize(b.passphrase) && q.playerBySecret.get(hashSecret(b.passphrase))
+          if (!p) {
+            failed(ip)
+            return send(res, 404, { error: 'unknown passphrase' })
+          }
+          return send(res, 200, { ...p, passphrase: normalize(b.passphrase) })
+        }
+        if (parts[1] === 'rename') {
+          const name = cleanName(b.name)
+          if (!name) return send(res, 400, { error: 'name required' })
+          const p = q.renamePlayer.get(name, hashSecret(b.passphrase))
+          if (!p) return send(res, 404, { error: 'unknown passphrase' })
+          for (const [roomId, set] of sockets) {
+            for (const ws of set) if (ws.player?.id === p.id) ws.player = p
+            broadcast(roomId, { type: 'player', player: p })
+          }
+          return send(res, 200, p)
+        }
+        return send(res, 404, { error: 'not found' })
+      }
+
       // /api/rooms
       if (parts[0] !== 'rooms') return send(res, 404, { error: 'not found' })
 
@@ -294,6 +429,9 @@ function createApi(dbFile) {
           if (!m || !Array.isArray(b.pieces) || !b.pieces.length) {
             return send(res, 400, { error: 'bad request' })
           }
+          // The creator proves who they are with their passphrase, and becomes the owner.
+          const owner = b.passphrase ? q.playerBySecret.get(hashSecret(b.passphrase)) : null
+          if (!owner) return send(res, 403, { error: 'log in to create a jigsaw' })
           const id = randomUUID().slice(0, 8)
           tx(() => {
             q.insertRoom.run(
@@ -310,6 +448,7 @@ function createApi(dbFile) {
               m[1],
               String(b.thumb || ''),
               b.annoying ? 1 : 0,
+              owner.id,
             )
             for (const p of b.pieces) q.insertPiece.run(id, p.i, p.x, p.y, p.r, p.g, null, p.f ? 1 : 0)
           })
@@ -323,15 +462,24 @@ function createApi(dbFile) {
 
       if (parts.length === 2) {
         if (req.method === 'GET') {
+          const players = new Map(q.roomPlayers.all(id).map((p) => [p.id, p]))
+          for (const ws of sockets.get(id) || []) if (ws.player) players.set(ws.player.id, ws.player)
           return send(res, 200, {
             ...room,
             pieces: q.pieces.all(id),
             notes: q.notes.all(id),
             refs: q.refs.all(id),
             times: q.times.all(id),
+            players: [...players.values()],
           })
         }
         if (req.method === 'DELETE') {
+          // Only the player who created the jigsaw may delete it; old jigsaws have no owner.
+          const b = await readJson(req, 64 * 1024)
+          const who = b.passphrase ? q.playerBySecret.get(hashSecret(b.passphrase)) : null
+          if (!room.owner || !who || who.id !== room.owner) {
+            return send(res, 403, { error: 'only the player who made this jigsaw can delete it' })
+          }
           tx(() => {
             q.deletePieces.run(id)
             q.deleteNotes.run(id)
@@ -353,7 +501,7 @@ function createApi(dbFile) {
 
       if (parts[2] === 'time' && req.method === 'POST') {
         const b = await readJson(req)
-        const user = String(b.user || '').slice(0, 32)
+        const user = playerId(b.user)
         const secs = Math.max(0, Math.min(300, Math.round(+b.seconds || 0)))
         if (!user || !secs) return send(res, 200, { ok: true })
         const { seconds } = q.addTime.get(id, user, secs)

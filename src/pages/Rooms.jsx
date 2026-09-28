@@ -1,56 +1,25 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api.js'
-import { ThemeButton, navigate, store, useApp } from '../App.jsx'
+import { navigate, store, useApp } from '../App.jsx'
 import { Check, Clock, Plus, Trash } from '../components/icons.jsx'
+import Sheet from '../components/Sheet.jsx'
+import NewRoom from './NewRoom.jsx'
+import Confirm from '../components/Confirm.jsx'
 import { formatTime } from '../lib/time.js'
 
-function Who() {
-  const { name, setName, requireName } = useApp()
-  const [edit, setEdit] = useState(false)
-  const [value, setValue] = useState(name || '')
-  if (!name) {
-    return (
-      <button className="who" onClick={requireName} title="Set your name">
-        Set name
-      </button>
-    )
-  }
-  if (!edit) {
-    return (
-      <button
-        className="who"
-        onClick={() => {
-          setValue(name)
-          setEdit(true)
-        }}
-        title="Change name"
-      >
-        {name}
-      </button>
-    )
-  }
-  const done = () => {
-    if (value.trim()) setName(value.trim().slice(0, 32))
-    else setValue(name)
-    setEdit(false)
-  }
+function Card({ r, mine, onOpen, onDelete }) {
   return (
-    <input
-      className="who-input"
-      autoFocus
-      value={value}
-      maxLength={32}
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={done}
-      onKeyDown={(e) => e.key === 'Enter' && done()}
-      aria-label="Name" title="Name"
-    />
-  )
-}
-
-function Card({ r, onDelete }) {
-  return (
-    <a className={`card${r.done ? ' done' : ''}`} href={`#/r/${r.id}`} title={r.name}>
+    <a
+      className={`card${r.done ? ' done' : ''}`}
+      href={`/r/${r.id}`}
+      title={r.name}
+      onClick={(e) => {
+        // Modified clicks still open the jigsaw in a new tab or window.
+        if (e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+        e.preventDefault()
+        onOpen(r.id)
+      }}
+    >
       <div className="thumb-wrap">
         <img className="thumb" src={r.thumb} alt="" loading="lazy" />
         {r.done && (
@@ -79,9 +48,11 @@ function Card({ r, onDelete }) {
           <span title="Pieces">{r.n}</span>
         </span>
       </div>
-      <button className="icon-btn del" onClick={(e) => onDelete(e, r)} aria-label="Delete" title="Delete jigsaw">
-        <Trash />
-      </button>
+      {mine && (
+        <button className="icon-btn del" onClick={(e) => onDelete(e, r)} aria-label="Delete" title="Delete jigsaw">
+          <Trash />
+        </button>
+      )}
     </a>
   )
 }
@@ -91,7 +62,10 @@ const SECTIONS = [
   { title: 'Finished', test: (r) => r.done },
 ]
 
-export default function RoomsPage() {
+// One window for the jigsaw list and the new jigsaw form: view is 'rooms' or 'new', and New
+// switches it in place, with a back button, rather than opening another window.
+export default function RoomsDialog({ view, setView, closing, onClose }) {
+  const { roomId, openRoom, player, playerId, openLogin } = useApp()
   const [rooms, setRooms] = useState(null)
 
   const load = () => api.rooms().then(setRooms).catch(() => setRooms([]))
@@ -99,51 +73,82 @@ export default function RoomsPage() {
     load()
   }, [])
 
-  const remove = async (e, room) => {
+  // The jigsaw waiting for a yes in the delete dialog.
+  const [doomed, setDoomed] = useState(null)
+  const keep = useCallback(() => setDoomed(null), [])
+  const ask = (e, room) => {
     e.preventDefault()
     e.stopPropagation()
-    if (!confirm(`Delete "${room.name}"?`)) return
-    await api.remove(room.id)
+    setDoomed(room)
+  }
+
+  const remove = async (room) => {
+    setDoomed(null)
+    try {
+      await api.remove(room.id, player?.passphrase)
+    } catch {
+      return load()
+    }
     if (store.get('lastRoom') === room.id) store.set('lastRoom', null)
+    if (roomId === room.id) navigate('/rooms')
     load()
   }
 
   return (
-    <div className="page">
-      <div className="bar">
-        <div className="title">
-          <h1>Jigsaws</h1>
-        </div>
-        <div className="right">
-          <Who />
-          <ThemeButton />
-        </div>
-      </div>
-      <section className="rooms-section">
-        <h2>New</h2>
-        <div className="grid">
-          <button className="card new" onClick={() => navigate('/new')} aria-label="New jigsaw" title="New jigsaw">
-            <Plus />
+    <Sheet
+      title={view === 'new' ? 'New jigsaw' : 'Jigsaws'}
+      onBack={view === 'new' ? () => setView('rooms') : null}
+      onClose={onClose}
+      closing={closing}
+      right={
+        !player && (
+          <button className="secondary small" onClick={openLogin} title="Log in with your passphrase">
+            Log in
           </button>
-        </div>
-      </section>
-      {SECTIONS.map(({ title, test }) => {
-        const list = rooms?.filter(test) || []
-        if (!list.length) return null
-        return (
-          <section key={title} className="rooms-section">
-            <h2>
-              {title}
-              <span className="n">{list.length}</span>
-            </h2>
+        )
+      }
+    >
+      {view === 'new' ? (
+        <NewRoom />
+      ) : (
+        <>
+          <section className="rooms-section">
+            <h2>New</h2>
             <div className="grid">
-              {list.map((r) => (
-                <Card key={r.id} r={r} onDelete={remove} />
-              ))}
+              <button className="card new" onClick={() => setView('new')} aria-label="New jigsaw" title="New jigsaw">
+                <Plus />
+              </button>
             </div>
           </section>
-        )
-      })}
-    </div>
+          {SECTIONS.map(({ title, test }) => {
+            const list = rooms?.filter(test) || []
+            if (!list.length) return null
+            return (
+              <section key={title} className="rooms-section">
+                <h2>
+                  {title}
+                  <span className="n">{list.length}</span>
+                </h2>
+                <div className="grid">
+                  {list.map((r) => (
+                    <Card key={r.id} r={r} mine={!!playerId && r.owner === playerId} onOpen={openRoom} onDelete={ask} />
+                  ))}
+                </div>
+              </section>
+            )
+          })}
+        </>
+      )}
+      {doomed && (
+        <Confirm
+          title={`Delete "${doomed.name}"?`}
+          text="The jigsaw and everything on its table goes for everyone. This can't be undone."
+          action="Delete"
+          danger
+          onCancel={keep}
+          onConfirm={() => remove(doomed)}
+        />
+      )}
+    </Sheet>
   )
 }

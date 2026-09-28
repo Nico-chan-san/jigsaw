@@ -10,7 +10,8 @@ const fmt = formatTime
 // Time only accrues while this window is visible and focused, and the jigsaw is unfinished.
 const active = () => document.visibilityState === 'visible' && document.hasFocus()
 
-export default function Timers({ roomId, name, initial, busRef, stopped, onTimes }) {
+// Time is kept per player id (me), since names aren't unique.
+export default function Timers({ roomId, me: name, initial, busRef, stopped, onTimes }) {
   const [times, setTimes] = useState(() => Object.fromEntries(initial.map((t) => [t.user, t.seconds])))
   const [pending, setPending] = useState(0)
   const pendingRef = useRef(0)

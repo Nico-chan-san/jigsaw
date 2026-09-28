@@ -9,7 +9,7 @@ const NOTE_W = 2.6
 // Live note drags are sent at most this often (ms).
 const LIVE_MS = 33
 
-function Note({ note, engine, focus, selected, canEdit, ensureName, onChange, onSave, onLive, onDelete }) {
+function Note({ note, engine, focus, selected, canEdit, author, ensureName, onChange, onSave, onLive, onDelete }) {
   const area = useRef(null)
   const saveTimer = useRef(0)
 
@@ -81,7 +81,7 @@ function Note({ note, engine, focus, selected, canEdit, ensureName, onChange, on
       onPointerMove={(e) => {
         if (e.buttons) return engine.showTip(null)
         const r = engine.canvas.getBoundingClientRect()
-        engine.showTip({ text: note.author, sx: e.clientX - r.left, sy: e.clientY - r.top })
+        engine.showTip({ text: author, sx: e.clientX - r.left, sy: e.clientY - r.top })
       }}
       onPointerLeave={() => engine.showTip(null)}
       onPointerDown={startMove}
@@ -111,7 +111,7 @@ function Note({ note, engine, focus, selected, canEdit, ensureName, onChange, on
   )
 }
 
-export function NotesLayer({ engine, roomId, name, initial, busRef, createRef, onNotes, ensureName, requireName }) {
+export function NotesLayer({ engine, roomId, me, nameOf, initial, busRef, createRef, onNotes, ensureName, requireName }) {
   const [notes, setNotes] = useState(initial)
   const [focusId, setFocusId] = useState(null)
   const [selected, setSelected] = useState(() => new Set())
@@ -234,7 +234,8 @@ export function NotesLayer({ engine, roomId, name, initial, busRef, createRef, o
           engine={engine}
           focus={focusId === n.id}
           selected={selected.has(n.id)}
-          canEdit={!!name}
+          canEdit={!!me}
+          author={nameOf(n.author)}
           ensureName={ensureName}
           onChange={change}
           onSave={save}
@@ -247,7 +248,7 @@ export function NotesLayer({ engine, roomId, name, initial, busRef, createRef, o
 }
 
 // Header button: drag it onto the board to drop a note there, or click to drop one in the centre.
-export function NoteButton({ createRef }) {
+export function NoteButton({ createRef, hint }) {
   const [ghost, setGhost] = useState(null)
 
   const down = (e) => {
@@ -273,8 +274,15 @@ export function NoteButton({ createRef }) {
 
   return (
     <>
-      <button className="icon-btn" onPointerDown={down} aria-label="Note" title="Drag a note onto the board">
+      <button
+        className="icon-btn"
+        onPointerDown={down}
+        aria-label="Note"
+        aria-keyshortcuts="N"
+        title="Drag a note onto the board (N)"
+      >
         <NoteIcon />
+        {hint}
       </button>
       {ghost &&
         createPortal(

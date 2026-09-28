@@ -86,6 +86,7 @@ button {
 /* ---- icon buttons ---- */
 
 .icon-btn {
+  position: relative;
   display: inline-grid;
   place-items: center;
   width: 36px;
@@ -183,46 +184,68 @@ button {
   }
 }
 
+/* Dialogs animating out before they go (see lib/linger.js for the timing). */
+.modal-bg.closing {
+  pointer-events: none;
+  animation: fade-out 0.16s ease forwards;
+}
+.modal-bg.closing .modal {
+  animation: pop-out 0.16s ease forwards;
+}
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes pop-out {
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+
 /* ---- rooms ---- */
 
-.page {
-  max-width: 1120px;
-  margin: 0 auto;
-  padding: 16px 16px 64px;
+/* ---- jigsaw list and new jigsaw dialogs ---- */
+
+.modal.sheet {
+  width: min(1080px, 100%);
+  height: calc(100dvh - 32px);
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
 }
-.bar {
+.sheet-head {
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  height: 44px;
-  margin-bottom: 24px;
+  padding: 12px 12px 12px 20px;
+  border-bottom: 1px solid var(--line);
 }
-.bar .right {
+.sheet-head .right {
   display: flex;
   align-items: center;
   gap: 4px;
 }
-.who {
-  padding: 6px 10px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--muted);
+.sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 20px 32px;
+  scrollbar-width: thin;
 }
-.who:hover {
-  background: var(--hover);
-  color: var(--fg);
+.sheet .create {
+  margin-top: 0;
+  padding-bottom: 0;
 }
-.who-input {
-  width: 140px;
-  padding: 6px 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  outline: 0;
-  background: transparent;
+/* Roomier text fields, like the name field in the account dialog. */
+.create .field > .text {
+  flex: none;
+  height: 48px;
+  padding: 0 16px;
 }
-
 .rooms-section + .rooms-section {
   margin-top: 40px;
 }
@@ -294,17 +317,6 @@ button {
   height: 100%;
   background: var(--fg);
 }
-.card .del {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  opacity: 0;
-  background: var(--panel);
-  backdrop-filter: blur(8px);
-}
-.card:hover .del {
-  opacity: 1;
-}
 .card.new {
   display: grid;
   place-items: center;
@@ -318,6 +330,17 @@ button {
 .card.new svg {
   width: 28px;
   height: 28px;
+}
+.card .del {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0;
+  background: var(--panel);
+  backdrop-filter: blur(8px);
+}
+.card:hover .del {
+  opacity: 1;
 }
 
 /* ---- form controls (name + new jigsaw pages) ---- */
@@ -524,14 +547,24 @@ button {
   background: var(--field);
 }
 .num {
+  width: 64px;
   min-width: 56px;
   padding: 4px 10px;
+  border: 1px solid transparent;
   border-radius: 7px;
+  outline: 0;
   background: var(--hover);
   font-size: 13px;
   font-weight: 500;
   text-align: center;
   font-variant-numeric: tabular-nums;
+}
+input.num:hover {
+  border-color: var(--line-strong);
+}
+input.num:focus {
+  border-color: var(--fg);
+  background: transparent;
 }
 
 input[type='range'] {
@@ -911,6 +944,7 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 
 /* The time readout doubles as the players panel toggle. */
 .stats-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   padding: 0;
@@ -1310,4 +1344,247 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
     grid-template-columns: 1fr;
     gap: 4px;
   }
+}
+
+/* ---- shortcut hints ---- */
+
+.kbd-hint {
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  color: var(--muted);
+  font: 600 9px/1 ui-sans-serif, system-ui, -apple-system, sans-serif;
+  pointer-events: none;
+}
+.icon-btn.on .kbd-hint,
+.stats-btn.on .kbd-hint {
+  color: inherit;
+  opacity: 0.6;
+}
+/* No keyboard to speak of on touch screens. */
+@media (hover: none) {
+  .kbd-hint {
+    display: none;
+  }
+}
+
+/* ---- settings ---- */
+
+.settings {
+  position: relative;
+  display: inline-flex;
+}
+.settings-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: -4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 240px;
+  padding: 12px 6px 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 8px 24px var(--shadow);
+  animation: pop 0.14s ease;
+}
+.settings-menu .label {
+  margin: 0;
+  padding: 0 8px 6px;
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  text-decoration: none;
+}
+.settings-row:hover {
+  background: var(--hover);
+}
+.settings-row svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+.settings-row span:first-of-type {
+  flex: 1;
+}
+.switch {
+  position: relative;
+  flex: none;
+  width: 30px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--line-strong);
+  transition: background 0.15s;
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--bg);
+  transition: transform 0.15s;
+}
+.switch.on {
+  background: var(--fg);
+}
+.switch.on::after {
+  transform: translateX(12px);
+}
+/* ---- finished jigsaw ---- */
+
+.celebration {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* ---- accounts ---- */
+
+.modal-text {
+  margin: -8px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.modal-error {
+  margin: -8px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+button.link {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+button.link:hover {
+  color: var(--fg);
+}
+.passphrase {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.passphrase .word {
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--field);
+  font: 500 15px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  user-select: all;
+}
+.settings-more {
+  color: var(--muted);
+  font-size: 12px;
+}
+.secondary.small {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+/* ---- account dialog ---- */
+
+.modal.account {
+  width: min(440px, 100%);
+  max-height: calc(100dvh - 32px);
+  gap: 16px;
+  padding: 20px 20px 20px 24px;
+}
+.account-body {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  margin-right: -8px;
+  padding-right: 8px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.account-body .modal-text,
+.account-body .modal-error {
+  margin: 0;
+}
+.account-body .text {
+  flex: none;
+  height: 48px;
+  padding: 0 16px;
+}
+.account-body .secondary svg {
+  width: 16px;
+  height: 16px;
+}
+.modal-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.qr-wrap {
+  display: grid;
+  place-items: center;
+  min-height: 200px;
+}
+.qr {
+  width: min(240px, 100%);
+  border-radius: 8px;
+}
+.settings-row svg.settings-ext {
+  width: 14px;
+  height: 14px;
+}
+
+/* "or" between the image drop area and the link field, with a rule on each side. */
+.or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.or::before,
+.or::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.modal-actions {
+  justify-content: flex-end;
+}
+
+/* Log out and other actions that end something. */
+:root {
+  --danger: #e5484d;
+}
+.settings-row.danger,
+.settings-row.danger svg {
+  color: var(--danger);
+}
+.primary.danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
 }

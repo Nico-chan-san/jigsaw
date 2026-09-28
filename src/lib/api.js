@@ -10,7 +10,16 @@ async function json(res) {
   return res.json()
 }
 
+const post = (url, body) =>
+  fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json)
+
 export const api = {
+  // Players: each resolves with { id, name, passphrase }.
+  signUp: (name) => post('/api/players', { name }),
+  claim: (name) => post('/api/players/claim', { name }),
+  login: (passphrase) => post('/api/players/login', { passphrase }),
+  rename: (passphrase, name) => post('/api/players/rename', { passphrase, name }),
+  lan: () => fetch('/api/lan').then(json),
   rooms: () => fetch('/api/rooms').then(json),
   room: (id) => fetch(`/api/rooms/${id}`).then(json),
   imageUrl: (id) => `/api/rooms/${id}/image`,
@@ -20,7 +29,12 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }).then(json),
-  remove: (id) => fetch(`/api/rooms/${id}`, { method: 'DELETE' }).then(json),
+  remove: (id, passphrase) =>
+    fetch(`/api/rooms/${id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ passphrase }),
+    }).then(json),
   time: (id, user, seconds, beacon = false) => {
     const body = JSON.stringify({ client: clientId, user, seconds })
     if (beacon && navigator.sendBeacon) return navigator.sendBeacon(`/api/rooms/${id}/time`, body)
@@ -38,7 +52,7 @@ export const api = {
   deleteRef: (id, refId) => sockets.get(id)?.send({ type: 'ref-delete', id: refId }),
   // Live room channel. Reconnects on its own; onOpen(reconnect) fires on every connect.
   // Changes made while disconnected are queued and sent once the socket is back.
-  socket: (id, { onMessage, onOpen }) => {
+  socket: (id, { player, onMessage, onOpen }) => {
     let ws = null
     let dead = false
     let retry = 0
@@ -47,7 +61,8 @@ export const api = {
     const queue = []
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const open = () => {
-      ws = new WebSocket(`${proto}//${location.host}/api/ws?room=${id}&client=${clientId}`)
+      const who = player?.() ? `&player=${player()}` : ''
+      ws = new WebSocket(`${proto}//${location.host}/api/ws?room=${id}&client=${clientId}${who}`)
       ws.onopen = () => {
         retry = 0
         for (const msg of queue.splice(0)) ws.send(JSON.stringify(msg))

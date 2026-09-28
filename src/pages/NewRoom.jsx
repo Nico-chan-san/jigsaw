@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
 import { SHAPES, buildPuzzle, gridFor, outlinePath, pile, samplePiecePath, scatter } from '../lib/geometry.js'
-import { ThemeButton, navigate, useApp } from '../App.jsx'
-import { Arrow, Back, Upload } from '../components/icons.jsx'
+import { useApp } from '../App.jsx'
+import { Arrow, Upload } from '../components/icons.jsx'
 
 const MIN = 4
 const MAX = 4000
+// The slider is logarithmic: 0..100 maps to MIN..MAX pieces.
 const toCount = (v) => Math.round(Math.exp(Math.log(MIN) + ((Math.log(MAX) - Math.log(MIN)) * v) / 100))
+const toSlider = (n) => ((Math.log(n) - Math.log(MIN)) / (Math.log(MAX) - Math.log(MIN))) * 100
+const clampCount = (n) => Math.min(MAX, Math.max(MIN, Math.round(n)))
 // The stored image's long side: 2400px, or more for big jigsaws so each piece keeps about 55px.
 const maxSide = (cols, rows) => Math.min(4000, Math.max(2400, Math.max(cols, rows) * 55))
 
@@ -80,11 +83,15 @@ function Preview({ img, cols, rows, shape, seed }) {
   return <canvas ref={ref} />
 }
 
+// The new jigsaw form, shown inside the jigsaws window.
 export default function NewRoom() {
-  const { requireName } = useApp()
+  const { requireName, currentPlayer, openRoom } = useApp()
   const [img, setImg] = useState(null)
   const [name, setName] = useState('')
-  const [slider, setSlider] = useState(44)
+  // Pieces asked for, by slider or typed. The jigsaw gets the closest grid to it.
+  const [count, setCount] = useState(() => toCount(44))
+  // What's in the number field while typing; null shows the actual piece count.
+  const [typed, setTyped] = useState(null)
   const [shape, setShape] = useState('classic')
   const [annoying, setAnnoying] = useState(false)
   const [over, setOver] = useState(false)
@@ -95,7 +102,8 @@ export default function NewRoom() {
   const [seed] = useState(() => (Math.random() * 2 ** 31) | 0)
   const input = useRef(null)
 
-  const grid = gridFor(toCount(slider), img?.naturalWidth || 4, img?.naturalHeight || 3)
+  const grid = gridFor(count, img?.naturalWidth || 4, img?.naturalHeight || 3)
+  const slider = toSlider(count)
 
   // Pasted images get a generic file name like "image.png", so they don't set the title.
   const pick = async (file, named = true) => {
@@ -169,30 +177,16 @@ export default function NewRoom() {
         thumb: thumb.data,
         annoying,
         pieces: annoying ? pile(room) : scatter(room),
+        passphrase: currentPlayer()?.passphrase,
       })
-      navigate(`/r/${id}`)
+      openRoom(id)
     } catch {
       setBusy(false)
     }
   }
 
   return (
-    <div className="page">
-      <div className="bar">
-        <div className="title">
-          <button
-            className="icon-btn"
-            onClick={() => navigate('/rooms')}
-            aria-label="Back"
-            title="Back to rooms"
-          >
-            <Back />
-          </button>
-          <h1>New jigsaw</h1>
-        </div>
-        <ThemeButton />
-      </div>
-      <div className="create">
+    <section className="create">
         <section className="field">
           <h2 className="label">Title</h2>
           <input
@@ -238,6 +232,9 @@ export default function NewRoom() {
             )}
             <input ref={input} type="file" accept="image/*" onChange={(e) => pick(e.target.files[0])} />
           </div>
+          <div className="or" aria-hidden="true">
+            or
+          </div>
           <form className="row" onSubmit={fromLink}>
             <input
               className={`text${linkError ? ' bad' : ''}`}
@@ -266,11 +263,32 @@ export default function NewRoom() {
               min="0"
               max="100"
               value={slider}
-              onChange={(e) => setSlider(+e.target.value)}
+              onChange={(e) => {
+                setCount(toCount(+e.target.value))
+                setTyped(null)
+              }}
               aria-label="Pieces"
               title="Number of pieces"
             />
-            <span className="num">{grid.cols * grid.rows}</span>
+            <input
+              className="num"
+              type="text"
+              inputMode="numeric"
+              value={typed ?? grid.cols * grid.rows}
+              onChange={(e) => {
+                const v = e.target.value.replace(/\D/g, '').slice(0, 4)
+                setTyped(v)
+                if (+v >= MIN) setCount(clampCount(+v))
+              }}
+              onFocus={(e) => e.target.select()}
+              onBlur={() => {
+                if (typed && +typed) setCount(clampCount(+typed))
+                setTyped(null)
+              }}
+              onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+              aria-label="Number of pieces"
+              title={`Type a number of pieces, ${MIN} to ${MAX}`}
+            />
           </div>
         </section>
 
@@ -325,7 +343,6 @@ export default function NewRoom() {
             </>
           )}
         </button>
-      </div>
-    </div>
+    </section>
   )
 }

@@ -46,7 +46,7 @@ function spawn(layer, emoji, sx, sy) {
 
 // Header button with a drop-down of reactions. With one picked, pressing on the board pours it
 // out of the pointer, for everyone in the room.
-export default function Reactions({ engine, busRef }) {
+export default function Reactions({ engine, busRef, hint }) {
   const [open, setOpen] = useState(false)
   const [kind, setKind] = useState(null)
   // The last reaction picked, which R turns back on.
@@ -76,6 +76,7 @@ export default function Reactions({ engine, busRef }) {
       if (e.key !== 'r' && e.key !== 'R') return
       if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
       if (e.target?.closest?.('input, textarea, [contenteditable]')) return
+      if (document.querySelector('.modal-bg')) return
       setOpen(false)
       setKind((k) => (k ? null : last.current))
     }
@@ -149,9 +150,11 @@ export default function Reactions({ engine, busRef }) {
         aria-label="Reactions"
         aria-expanded={open}
         aria-pressed={!!kind}
-        title={pick ? `${pick.label}: press on the board to react. Click to stop` : 'Reactions'}
+        aria-keyshortcuts="R"
+        title={pick ? `${pick.label}: press on the board to react. Click to stop (R)` : 'Reactions (R)'}
       >
         {pick ? <span className="react-emoji">{pick.emoji}</span> : <Smile />}
+        {hint}
       </button>
       {open && (
         <div className="react-menu" role="menu">

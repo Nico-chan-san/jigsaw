@@ -7,12 +7,11 @@ const SECTIONS = [
   {
     title: 'Mouse',
     rows: [
-      [<Key key="lp">Left drag on a piece</Key>, 'Pick up the piece (or its whole module) and move it'],
-      [<Key key="lc">Click a piece</Key>, 'In annoying mode, flip a loose piece over'],
-      [<Key key="lt">Left drag on the table</Key>, 'Draw a box to select pieces, images and notes'],
-      [<Key key="ls">Left drag on a selection</Key>, 'Move everything selected at once, images and notes included'],
-      [<Key key="r">Right drag</Key>, 'Move around the table'],
-      [<Key key="w">Scroll wheel</Key>, 'Zoom in and out'],
+      [<Key key="lp">Drag a piece</Key>, 'Move it'],
+      [<Key key="lc">Click a piece</Key>, 'Select it (and flip it in annoying mode)'],
+      [<Key key="lt">Drag the table</Key>, 'Select'],
+      [<Key key="r">Right drag</Key>, 'Pan'],
+      [<Key key="w">Scroll</Key>, 'Zoom'],
     ],
   },
   {
@@ -20,36 +19,59 @@ const SECTIONS = [
     rows: [
       [
         <>
-          <Key>←</Key>
-          <Key>→</Key>
+          <Key>W</Key>
+          <Key>A</Key>
+          <Key>S</Key>
+          <Key>D</Key>
         </>,
-        'While holding pieces, rotate each piece (or module) 90° in place',
+        'Pan (arrow keys too)',
       ],
-      [<Key key="r">R</Key>, 'Turn reactions on or off, with the last one you used'],
-      [<Key key="sh">Shift</Key>, 'Hold while clicking a piece, image or note, or drawing a box, to add to the selection'],
-      [<Key key="e">Esc</Key>, 'Clear the selection'],
+      [<Key key="sp">Space</Key>, 'Rotate held or selected pieces'],
+      [
+        <>
+          <Key>Shift</Key>
+          <Key>Space</Key>
+        </>,
+        'Rotate them all together, around their centre',
+      ],
+      [<Key key="g">G</Key>, 'Sort selected pieces into a grid'],
+      [
+        <>
+          <Key>+</Key>
+          <Key>-</Key>
+        </>,
+        'Zoom',
+      ],
+      [<Key key="c">C</Key>, 'Fit to screen'],
+      [<Key key="h">H</Key>, 'This help'],
+      [<Key key="p">P</Key>, 'Players'],
+      [<Key key="n">N</Key>, 'New note'],
+      [<Key key="i">I</Key>, 'New image'],
+      [<Key key="r">R</Key>, 'Reactions'],
+      [<Key key="sh">Shift</Key>, 'Add to selection'],
+      [<Key key="e">Esc</Key>, 'Clear selection'],
     ],
   },
   {
-    title: 'Touch screens',
+    title: 'Touch',
     rows: [
       [<Key key="tp">Drag a piece</Key>, 'Move it'],
-      [<Key key="tc">Tap a piece</Key>, 'In annoying mode, flip a loose piece over'],
-      [<Key key="tt">Drag the table</Key>, 'Move around the table; pinch to zoom'],
-      [<Key key="t2">2nd finger</Key>, 'While holding pieces, tap with a second finger to rotate them in place'],
+      [<Key key="tt">Drag the table</Key>, 'Pan, pinch to zoom'],
+      [<Key key="t2">2nd finger tap</Key>, 'Rotate held pieces'],
     ],
   },
 ]
 
-export default function Help({ onClose }) {
+export default function Help({ onClose, closing }) {
   useEffect(() => {
+    if (closing) return
     const key = (e) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
-  }, [onClose])
+  }, [onClose, closing])
 
   return (
-    <div className="modal-bg" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className={`modal-bg${closing ? ' closing' : ''}`} onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal help" role="dialog" aria-label="How to play">
         <div className="help-head">
           <h1>How to play</h1>

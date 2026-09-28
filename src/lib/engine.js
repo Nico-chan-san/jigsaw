@@ -25,6 +25,18 @@ const DEL_R = 11
 // Cursor updates are throttled to this interval (ms); idle cursors vanish after CURSOR_IDLE.
 const CURSOR_MS = 50
 const CURSOR_IDLE = 20000
+// Arrow keys and WASD move the camera, at this many screen pixels per second.
+const PAN_SPEED = 900
+const PAN_KEYS = {
+  ArrowLeft: [-1, 0],
+  ArrowRight: [1, 0],
+  ArrowUp: [0, -1],
+  ArrowDown: [0, 1],
+  a: [-1, 0],
+  d: [1, 0],
+  w: [0, -1],
+  s: [0, 1],
+}
 const CURSOR_COLORS = ['#e5484d', '#0090ff', '#30a46c', '#f76b15', '#8e4ec6', '#d6409f', '#12a594', '#ca8a04']
 const cursorColor = (id) => {
   let h = 0
@@ -33,7 +45,7 @@ const cursorColor = (id) => {
 }
 
 export class Engine {
-  constructor(canvas, { room, image, pieces, refs, overlay, user, guard, tooltip, send, onGroups, onComplete, onReady, onRef, onRefDelete, onRefs }) {
+  constructor(canvas, { room, image, pieces, refs, overlay, user, userName, nameOf, guard, tooltip, send, onGroups, onComplete, onReady, onRef, onRefDelete, onRefs }) {
     this.canvas = canvas
     this.ctx = canvas.getContext('2d')
     this.layer = document.createElement('canvas')
@@ -54,7 +66,11 @@ export class Engine {
     this.shCtx = this.shadowLayer.getContext('2d')
     this.room = room
     this.image = image
+    // This player's id (stored on what they do) and name (shown on their cursor).
     this.user = user
+    this.userName = userName
+    // Looks up a player's name by id, for the tooltips.
+    this.nameOf = nameOf || ((id) => id)
     // Called before any action that needs a player name; returns false to block it.
     this.guard = guard
     this.tooltip = tooltip
@@ -80,6 +96,8 @@ export class Engine {
     this.f = new Uint8Array(n)
     this.backs = new Array(n)
     this.flips = new Map()
+    // Pieces turned in place on the table, still animating: i -> { cx, cy, a } (a in radians, decays to 0).
+    this.turns = new Map()
     this.hl = null
     // Selected pieces (always whole groups), reference images and notes, by id.
     this.sel = new Set()
@@ -144,6 +162,8 @@ export class Engine {
     this.lift = null
     this.pan = null
     this.pointers = new Map()
+    // Pan keys held down right now.
+    this.panKeys = new Set()
     this.held = new Map()
     this.moving = new Map()
     this.colors = { bg: '#f4f4f4', dot: 'rgba(0,0,0,.12)', shadow: 'rgba(0,0,0,.35)', sel: '#2f6fed' }
@@ -168,6 +188,10 @@ export class Engine {
       up: (e) => this.onUp(e),
       wheel: (e) => this.onWheel(e),
       key: (e) => this.onKey(e),
+      keyup: (e) => {
+        if (this.panKeys.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key)) this.invalidate(false)
+      },
+      stopPan: () => this.panKeys.clear(),
       leave: () => {
         this.showTip(null)
         this.setHighlight(null)
@@ -196,6 +220,8 @@ export class Engine {
     c.addEventListener('wheel', this.h.wheel, { passive: false })
     c.addEventListener('contextmenu', this.h.menu)
     window.addEventListener('keydown', this.h.key)
+    window.addEventListener('keyup', this.h.keyup)
+    window.addEventListener('blur', this.h.stopPan)
     window.addEventListener('pointermove', this.h.track, true)
     document.documentElement.addEventListener('pointerleave', this.h.gone)
     window.addEventListener('blur', this.h.gone)
@@ -213,6 +239,8 @@ export class Engine {
     c.removeEventListener('wheel', this.h.wheel)
     c.removeEventListener('contextmenu', this.h.menu)
     window.removeEventListener('keydown', this.h.key)
+    window.removeEventListener('keyup', this.h.keyup)
+    window.removeEventListener('blur', this.h.stopPan)
     window.removeEventListener('pointermove', this.h.track, true)
     document.documentElement.removeEventListener('pointerleave', this.h.gone)
     window.removeEventListener('blur', this.h.gone)
@@ -275,17 +303,20 @@ export class Engine {
     this.invalidate()
   }
 
+  // Eases the zoom around the middle of the view. Presses during the animation add up.
   zoomBy(f) {
-    this.camAnim = null
-    this.zoomAt(this.vw / 2, this.vh / 2, f)
+    const a = this.camAnim
+    const from = a?.zoom ? a.to : this.cam
+    const z = Math.min(this.zmax, Math.max(this.zmin, from.z * f))
+    this.camAnim = { from: { ...this.cam }, to: { x: from.x, y: from.y, z }, t0: performance.now(), ms: 260, zoom: true }
+    this.invalidate()
   }
 
-  bbox(ids) {
+  bbox(ids, e = Math.max(this.geo.w, this.geo.h) / 2 + this.geo.pad) {
     let x0 = Infinity
     let y0 = Infinity
     let x1 = -Infinity
     let y1 = -Infinity
-    const e = Math.max(this.geo.w, this.geo.h) / 2 + this.geo.pad
     for (const i of ids) {
       x0 = Math.min(x0, this.x[i] - e)
       y0 = Math.min(y0, this.y[i] - e)
@@ -351,12 +382,12 @@ export class Engine {
     return true
   }
 
-  // Per player: how many pieces they connected.
+  // Per player id: how many pieces they connected.
   contributors() {
     const m = new Map()
-    const get = (name) => {
-      if (!m.has(name)) m.set(name, { name, pieces: 0 })
-      return m.get(name)
+    const get = (id) => {
+      if (!m.has(id)) m.set(id, { id, pieces: 0 })
+      return m.get(id)
     }
     for (let i = 0; i < this.n; i++) if (this.by[i]) get(this.by[i]).pieces++
     return m
@@ -398,6 +429,42 @@ export class Engine {
     const out = new Set()
     for (let i = 0; i < this.n; i++) if (gids.has(this.g[i])) out.add(i)
     return out
+  }
+
+  // Splits a list of pieces into one list per group.
+  modules(ids) {
+    const m = new Map()
+    for (const i of ids) {
+      if (!m.has(this.g[i])) m.set(this.g[i], [])
+      m.get(this.g[i]).push(i)
+    }
+    return [...m.values()]
+  }
+
+  // The selected pieces that nobody else is holding right now.
+  freeSelection() {
+    const now = performance.now()
+    return [...this.withGroups(this.sel)].filter((i) => !(this.held.get(i) > now))
+  }
+
+  // Ends any movement animation on these pieces, so they sit where they are headed.
+  settle(ids) {
+    for (const i of ids) {
+      const to = this.moving.get(i)
+      if (to) [this.x[i], this.y[i]] = to
+      this.moving.delete(i)
+    }
+  }
+
+  // Where piece i is drawn on the table: [x, y, angle], including a turn in progress.
+  pose(i) {
+    const t = this.turns.get(i)
+    if (!t) return [this.x[i], this.y[i], this.r[i] * Q]
+    const dx = this.x[i] - t.cx
+    const dy = this.y[i] - t.cy
+    const c = Math.cos(t.a)
+    const s = Math.sin(t.a)
+    return [t.cx + dx * c - dy * s, t.cy + dx * s + dy * c, this.r[i] * Q + t.a]
   }
 
   setSelection(set, refs = new Set(), notes = new Set()) {
@@ -662,9 +729,14 @@ export class Engine {
         for (const j of grp) on ? next.add(j) : next.delete(j)
         return this.setSelection(next, this.selRefs, this.selNotes)
       }
-      if (this.sel.has(i)) return this.grabSelection(e, { piece: true })
-      if (this.selCount) this.setSelection(new Set())
-      return this.startDrag(this.members(this.g[i]), wx, wy, e.pointerId, sx, sy)
+      if (this.sel.has(i)) this.grabSelection(e, { piece: true })
+      else {
+        if (this.selCount) this.setSelection(new Set())
+        this.startDrag(this.members(this.g[i]), wx, wy, e.pointerId, sx, sy)
+      }
+      // Remembered so a click (no drag) can select what was clicked.
+      if (this.drag) this.drag.piece = i
+      return
     }
     if (rh?.mode === 'move' && e.shiftKey) {
       if (this.guard && !this.guard()) return
@@ -762,6 +834,8 @@ export class Engine {
       const click = this.room.annoying && d.ids.length === 1 && !d.moved && performance.now() - d.t0 < CLICK_MS
       this.drop()
       if (click) this.flip(d.ids[0])
+      // Clicking a piece without dragging selects it (its whole module), and only it.
+      if (!d.moved && d.piece !== undefined) this.setSelection(new Set(this.members(this.g[d.piece])))
     }
     if (this.carry && e.pointerId === this.carry.pointer) this.endCarry()
     if (this.pan && e.pointerId === this.pan.pointer) {
@@ -815,6 +889,8 @@ export class Engine {
 
   onKey(e) {
     if (e.target?.closest?.('input, textarea, [contenteditable]')) return
+    // Dialogs over the board keep the keyboard.
+    if (document.querySelector('.modal-bg')) return
     if (e.key === 'Escape' && !this.drag) {
       if (this.selCount) this.setSelection(new Set())
       this.selectRef(null)
@@ -824,11 +900,29 @@ export class Engine {
       e.preventDefault()
       return this.removeRef(this.refSel)
     }
-    if (!this.drag) return
-    const dir = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key]
-    if (!dir) return
-    e.preventDefault()
-    if (!e.repeat) this.spin(dir)
+    if (e.ctrlKey || e.metaKey || e.altKey) return
+    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key
+    // Arrow keys and WASD move around the table while held, also while carrying pieces.
+    if (PAN_KEYS[key]) {
+      e.preventDefault()
+      this.camAnim = null
+      this.panKeys.add(key)
+      this.invalidate(false)
+      return
+    }
+    // While holding pieces: space turns them, G gathers the carried groups.
+    if (this.drag) {
+      if (key !== ' ' && key !== 'g') return
+      e.preventDefault()
+      if (e.repeat) return
+      return key === ' ' ? this.spin(1, e.shiftKey) : this.gather()
+    }
+    // With a selection on the table, space turns the pieces where they lie (shift: all as one) and G
+    // sorts them into a grid.
+    if ((key === ' ' || key === 'g') && this.sel.size) {
+      e.preventDefault()
+      if (!e.repeat) key === 'g' ? this.sortSelection() : this.rotateSelection(1, e.shiftKey)
+    }
   }
 
   // Groups only form through grid neighbours, so a piece is connected iff a neighbour shares its group.
@@ -862,10 +956,10 @@ export class Engine {
               ? 'move'
               : ''
     let hl = null
-    if (i >= 0 && this.by[i] && this.connected(i)) hl = { key: `p:${i}`, ids: [i], text: this.by[i] }
+    if (i >= 0 && this.by[i] && this.connected(i)) hl = { key: `p:${i}`, ids: [i], text: this.nameOf(this.by[i]) }
     this.setHighlight(hl)
     // Hovering a reference image (not covered by a piece) shows who put it there.
-    const text = hl ? hl.text : i < 0 && rh?.ref.author ? rh.ref.author : null
+    const text = hl ? hl.text : i < 0 && rh?.ref.author ? this.nameOf(rh.ref.author) : null
     this.showTip(text ? { text, sx, sy } : null)
   }
 
@@ -910,6 +1004,9 @@ export class Engine {
       cx: new Float64Array(ids.length),
       cy: new Float64Array(ids.length),
       sa: new Float64Array(ids.length),
+      // Per piece: the part of a gather (G) still animating, as an offset in world units.
+      tx: new Float64Array(ids.length),
+      ty: new Float64Array(ids.length),
       spinning: false,
       // A press that neither moves nor turns anything is a click (flips a piece in annoying mode).
       t0: performance.now(),
@@ -917,7 +1014,11 @@ export class Engine {
       sy0: sy,
       moved: false,
     }
-    for (const i of ids) this.flips.delete(i)
+    for (const i of ids) {
+      this.flips.delete(i)
+      this.turns.delete(i)
+      this.moving.delete(i)
+    }
     const keep = this.lift && this.lift.ids.length === ids.length && set.has(this.lift.ids[0])
     this.lift = { ids, set, value: keep ? this.lift.value : 0, target: 1, px: wx, py: wy, angle: 0 }
     this.buildLiftSprite()
@@ -977,16 +1078,13 @@ export class Engine {
   }
 
   // Turns each carried module a quarter around its own centre, leaving the modules where they are.
-  spin(dir) {
+  // With whole, everything carried turns together around its common centre instead.
+  spin(dir, whole = false) {
     const d = this.drag
     if (!d) return
     const at = new Map(d.ids.map((i, j) => [i, j]))
-    const seen = new Set()
-    for (const i of d.ids) {
-      if (seen.has(i)) continue
-      const js = this.members(this.g[i])
-        .filter((m) => at.has(m))
-        .map((m) => at.get(m))
+    const sets = whole ? [d.ids.map((_, j) => j)] : this.modules(d.ids).map((m) => m.map((i) => at.get(i)))
+    for (const js of sets) {
       let x0 = Infinity
       let y0 = Infinity
       let x1 = -Infinity
@@ -1000,10 +1098,10 @@ export class Engine {
       const cx = (x0 + x1) / 2
       const cy = (y0 + y1) / 2
       for (const j of js) {
-        seen.add(d.ids[j])
         const [rx, ry] = rot(d.ox[j] - cx, d.oy[j] - cy, dir)
         d.ox[j] = cx + rx
         d.oy[j] = cy + ry
+        ;[d.tx[j], d.ty[j]] = rot(d.tx[j], d.ty[j], dir)
         d.r0[j] = mod4(d.r0[j] + dir)
         d.cx[j] = cx
         d.cy[j] = cy
@@ -1016,6 +1114,181 @@ export class Engine {
     // Other players get the new offsets as a fresh grab that keeps the current turn.
     this.send({ type: 'grab', ids: d.ids, ox: d.ox.map(r2), oy: d.oy.map(r2), r0: d.r0, px: r2(d.px), py: r2(d.py), k: d.k })
     this.invalidate(false)
+  }
+
+  // Room around a module when laying modules out side by side: enough that tabs don't overlap
+  // and neighbours stay out of snapping range of each other.
+  get packExtent() {
+    return Math.max(this.geo.w, this.geo.h) / 2 + this.geo.pad * 0.7
+  }
+
+  // Lays boxes ({ x0, y0, x1, y1 }) out in a square grid centred on 0, in reading order of where
+  // they lie now. Every column is as wide as its widest box and every row as tall as its tallest.
+  // Returns the new centre of each box.
+  pack(boxes) {
+    const S = this.geo.S
+    const gap = S * 0.12
+    const mid = (b) => [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2]
+    const order = boxes
+      .map((b, k) => ({ k, x: mid(b)[0], row: Math.round(mid(b)[1] / (S * 1.5)) }))
+      .sort((a, b) => a.row - b.row || a.x - b.x)
+      .map((o) => o.k)
+    const cols = Math.ceil(Math.sqrt(boxes.length))
+    const rows = Math.ceil(boxes.length / cols)
+    const cw = new Array(cols).fill(0)
+    const rh = new Array(rows).fill(0)
+    order.forEach((k, n) => {
+      const b = boxes[k]
+      cw[n % cols] = Math.max(cw[n % cols], b.x1 - b.x0)
+      rh[(n / cols) | 0] = Math.max(rh[(n / cols) | 0], b.y1 - b.y0)
+    })
+    const starts = (sizes) => {
+      let at = -(sizes.reduce((a, b) => a + b, 0) + gap * (sizes.length - 1)) / 2
+      return sizes.map((v) => {
+        const s = at
+        at += v + gap
+        return s
+      })
+    }
+    const xs = starts(cw)
+    const ys = starts(rh)
+    const out = new Array(boxes.length)
+    order.forEach((k, n) => {
+      const c = n % cols
+      const r = (n / cols) | 0
+      out[k] = [xs[c] + cw[c] / 2, ys[r] + rh[r] / 2]
+    })
+    return out
+  }
+
+  // G while holding several groups: pulls them together in a grid around the pointer, none overlapping.
+  gather() {
+    const d = this.drag
+    if (!d) return
+    const at = new Map(d.ids.map((i, j) => [i, j]))
+    const mods = this.modules(d.ids).map((m) => m.map((i) => at.get(i)))
+    if (mods.length < 2) return
+    const e = this.packExtent
+    const boxes = mods.map((js) => {
+      const b = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity }
+      for (const j of js) {
+        b.x0 = Math.min(b.x0, d.ox[j] - e)
+        b.y0 = Math.min(b.y0, d.oy[j] - e)
+        b.x1 = Math.max(b.x1, d.ox[j] + e)
+        b.y1 = Math.max(b.y1, d.oy[j] + e)
+      }
+      return b
+    })
+    const spots = this.pack(boxes)
+    mods.forEach((js, m) => {
+      const b = boxes[m]
+      const dx = spots[m][0] - (b.x0 + b.x1) / 2
+      const dy = spots[m][1] - (b.y0 + b.y1) / 2
+      for (const j of js) {
+        d.ox[j] += dx
+        d.oy[j] += dy
+        d.cx[j] += dx
+        d.cy[j] += dy
+        d.tx[j] -= dx
+        d.ty[j] -= dy
+      }
+    })
+    d.spinning = true
+    d.moved = true
+    this.buildLiftSprite()
+    this.send({ type: 'grab', ids: d.ids, ox: d.ox.map(r2), oy: d.oy.map(r2), r0: d.r0, px: r2(d.px), py: r2(d.py), k: d.k })
+    this.invalidate(false)
+  }
+
+  // Snaps each module on its own, then eases every piece the snap moved from where it was.
+  snapModules(mods) {
+    const x0 = this.x.slice()
+    const y0 = this.y.slice()
+    const changed = new Set()
+    for (const m of mods) for (const j of this.snap(m)) changed.add(j)
+    for (const i of changed) {
+      if (this.x[i] === x0[i] && this.y[i] === y0[i]) continue
+      this.moving.set(i, [this.x[i], this.y[i]])
+      this.x[i] = x0[i]
+      this.y[i] = y0[i]
+    }
+    return changed
+  }
+
+  // Space with a selection: turns each selected module a quarter around its centre, on the table.
+  // With whole (shift), the selection turns as one around its common centre.
+  rotateSelection(dir, whole = false) {
+    if (this.guard && !this.guard()) return
+    const ids = this.freeSelection()
+    if (!ids.length) return
+    this.settle(ids)
+    const mods = this.modules(ids)
+    for (const m of whole ? [ids] : mods) {
+      const b = this.bbox(m, 0)
+      const cx = (b.x0 + b.x1) / 2
+      const cy = (b.y0 + b.y1) / 2
+      for (const i of m) {
+        const [rx, ry] = rot(this.x[i] - cx, this.y[i] - cy, dir)
+        this.x[i] = cx + rx
+        this.y[i] = cy + ry
+        this.r[i] = mod4(this.r[i] + dir)
+        this.flips.delete(i)
+        this.turns.set(i, { cx, cy, a: (this.turns.get(i)?.a || 0) - dir * Q })
+      }
+    }
+    this.commit(this.snapModules(mods))
+  }
+
+  // Lays the selected modules out in a square grid, centred where the selection lies now.
+  sortSelection() {
+    if (this.guard && !this.guard()) return
+    const ids = this.freeSelection()
+    if (!ids.length) return
+    this.settle(ids)
+    const mods = this.modules(ids)
+    const all = this.bbox(ids, 0)
+    const cx = (all.x0 + all.x1) / 2
+    const cy = (all.y0 + all.y1) / 2
+    const boxes = mods.map((m) => this.bbox(m, this.packExtent))
+    const spots = this.pack(boxes)
+    const x0 = this.x.slice()
+    const y0 = this.y.slice()
+    mods.forEach((m, k) => {
+      const b = boxes[k]
+      const dx = cx + spots[k][0] - (b.x0 + b.x1) / 2
+      const dy = cy + spots[k][1] - (b.y0 + b.y1) / 2
+      for (const i of m) {
+        this.x[i] += dx
+        this.y[i] += dy
+      }
+    })
+    const changed = this.snapModules(mods)
+    // Ease everything from where it was, not just what the snap moved.
+    for (const i of ids) {
+      if (!this.moving.has(i)) this.moving.set(i, [this.x[i], this.y[i]])
+      this.x[i] = x0[i]
+      this.y[i] = y0[i]
+    }
+    this.toTop(new Set(ids))
+    this.commit(changed)
+  }
+
+  // Tells everyone where these pieces ended up (after a drop, turn or sort) and updates the rest.
+  commit(changed) {
+    if (this.sel.size) this.sel = this.withGroups(this.sel)
+    this.send({
+      type: 'moves',
+      pieces: [...changed].map((i) => {
+        const [x, y] = this.moving.get(i) || [this.x[i], this.y[i]]
+        return { i, x, y, r: this.r[i], g: this.g[i], by: this.by[i], f: this.f[i] }
+      }),
+    })
+    this.emitGroups()
+    this.invalidate()
+    if (this.isComplete()) {
+      this.onComplete?.()
+      setTimeout(() => this.fit(), 250)
+    }
   }
 
   dragState() {
@@ -1033,7 +1306,7 @@ export class Engine {
     if (force || now - this.lastCursor >= CURSOR_MS) {
       this.lastCursor = now
       const [x, y] = this.toWorld(...this.pointerAt)
-      this.send({ type: 'cursor', x: r2(x), y: r2(y), name: this.user || '' })
+      this.send({ type: 'cursor', x: r2(x), y: r2(y), name: this.userName || '' })
     } else {
       this.cursorTimer = setTimeout(() => this.sendCursor(true), CURSOR_MS - (now - this.lastCursor))
     }
@@ -1086,18 +1359,8 @@ export class Engine {
     } else l.sprite = null
     l.target = 0
 
-    if (this.sel.size) this.sel = this.withGroups(this.sel)
     this.canvas.style.cursor = ''
-    this.send({
-      type: 'moves',
-      pieces: [...changed].map((i) => ({ i, x: this.x[i], y: this.y[i], r: this.r[i], g: this.g[i], by: this.by[i], f: this.f[i] })),
-    })
-    this.emitGroups()
-    this.invalidate()
-    if (this.isComplete()) {
-      this.onComplete?.()
-      setTimeout(() => this.fit(), 250)
-    }
+    this.commit(changed)
   }
 
   // Turns a loose piece over. Pieces in a module are always face up, so they stay put.
@@ -1288,9 +1551,10 @@ export class Engine {
     return [ref.w, ref.w * this.refAspect]
   }
 
-  addRef() {
+  // Adds the reference image centred on a canvas point, or the middle of the view.
+  addRef(sx = this.vw / 2, sy = this.vh / 2) {
     if (this.guard && !this.guard()) return
-    const [x, y] = this.toWorld(this.vw / 2, this.vh / 2)
+    const [x, y] = this.toWorld(sx, sy)
     // Fit comfortably in the current view.
     const w = Math.min(this.room.width, ((Math.min(this.vw, this.vh / this.refAspect) * 0.6) / this.cam.z))
     const ref = { id: Math.random().toString(36).slice(2, 10), x, y, w, author: this.user || '' }
@@ -1462,6 +1726,26 @@ export class Engine {
       } else again = true
     }
 
+    if (this.panKeys.size) {
+      let vx = 0
+      let vy = 0
+      for (const k of this.panKeys) {
+        vx += PAN_KEYS[k][0]
+        vy += PAN_KEYS[k][1]
+      }
+      if (vx || vy) {
+        const f = (PAN_SPEED * dt) / 1000 / Math.hypot(vx, vy) / this.cam.z
+        this.cam.x += vx * f
+        this.cam.y += vy * f
+        this.clampCam()
+        if (this.drag) {
+          this.updatePivot()
+          this.sendLive()
+        }
+      }
+      again = true
+    }
+
     if (this.drag) {
       const d = this.drag
       const edge = 40
@@ -1487,14 +1771,21 @@ export class Engine {
       else d.angle = target
       if (d.spinning) {
         const f = ease(dt, 45)
+        const fm = ease(dt, 60)
         let left = 0
+        let far = 0
         for (let j = 0; j < d.sa.length; j++) {
           d.sa[j] -= d.sa[j] * f
+          d.tx[j] -= d.tx[j] * fm
+          d.ty[j] -= d.ty[j] * fm
           left = Math.max(left, Math.abs(d.sa[j]))
+          far = Math.max(far, Math.abs(d.tx[j]) + Math.abs(d.ty[j]))
         }
-        if (left > 0.001) again = true
+        if (left > 0.001 || far > 0.05) again = true
         else {
           d.sa.fill(0)
+          d.tx.fill(0)
+          d.ty.fill(0)
           d.spinning = false
         }
       }
@@ -1526,6 +1817,16 @@ export class Engine {
     if (this.cursors.size) {
       clearTimeout(this.idleTimer)
       this.idleTimer = setTimeout(() => this.invalidate(false), CURSOR_IDLE + 100)
+    }
+
+    if (this.turns.size) {
+      this.sceneVer++
+      const f = ease(dt, 45)
+      for (const [i, t] of this.turns) {
+        t.a -= t.a * f
+        if (Math.abs(t.a) < 0.001) this.turns.delete(i)
+      }
+      again = true
     }
 
     if (this.flips.size) {
@@ -1576,6 +1877,11 @@ export class Engine {
       this.drawScene(ctx, view)
     }
     if (this.lift) this.drawLift(view)
+    // Pieces still landing after a drop get their selection outline right away, on top.
+    if (this.lift && !this.drag && this.sel.size) {
+      const ids = [...this.sel].filter((i) => this.lift.set.has(i))
+      if (ids.length) this.drawOutline(ctx, ids, this.colors.sel)
+    }
     this.drawChrome()
   }
 
@@ -1619,10 +1925,9 @@ export class Engine {
     const sc = this.spriteScale
     for (const i of this.order) {
       if (lifted?.has(i)) continue
-      const x = this.x[i]
-      const y = this.y[i]
+      const [x, y, a] = this.pose(i)
       if (x + R < wx0 || x - R > wx1 || y + R < wy0 || y - R > wy1) continue
-      this.drawPiece(ctx, i, x, y, this.r[i] * Q, 1, sc)
+      this.drawPiece(ctx, i, x, y, a, 1, sc)
     }
 
     if (this.hl && !this.drag) this.drawOutline(ctx, this.hl.ids, this.colors.line || '#000')
@@ -1669,8 +1974,8 @@ export class Engine {
         const a = d.sa[j]
         const dx = d.ox[j] - d.cx[j]
         const dy = d.oy[j] - d.cy[j]
-        const ox = d.cx[j] + dx * Math.cos(a) - dy * Math.sin(a)
-        const oy = d.cy[j] + dx * Math.sin(a) + dy * Math.cos(a)
+        const ox = d.cx[j] + dx * Math.cos(a) - dy * Math.sin(a) + d.tx[j]
+        const oy = d.cy[j] + dx * Math.sin(a) + dy * Math.cos(a) + d.ty[j]
         const x = l.px + (ox * ca - oy * sa) * s
         const y = l.py + (ox * sa + oy * ca) * s
         if (x + R * s < wx0 || x - R * s > wx1 || y + R * s < wy0 || y - R * s > wy1) continue
@@ -1860,11 +2165,11 @@ export class Engine {
     const c = this.hlCtx
     const z = cam.z * dpr
     const place = (i) => {
-      const a = this.r[i] * Q
+      const [x, y, a] = this.pose(i)
       const co = Math.cos(a) * z
       const sn = Math.sin(a) * z
       const sx = this.f[i] ? -1 : 1
-      c.setTransform(co * sx, sn * sx, -sn, co, ((this.x[i] - cam.x) * cam.z + vw / 2) * dpr, ((this.y[i] - cam.y) * cam.z + vh / 2) * dpr)
+      c.setTransform(co * sx, sn * sx, -sn, co, ((x - cam.x) * cam.z + vw / 2) * dpr, ((y - cam.y) * cam.z + vh / 2) * dpr)
     }
     c.setTransform(1, 0, 0, 1, 0, 0)
     c.clearRect(0, 0, this.hlLayer.width, this.hlLayer.height)

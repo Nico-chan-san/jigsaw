@@ -1,8 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import RoomsPage from './pages/Rooms.jsx'
-import NewRoom from './pages/NewRoom.jsx'
+import RoomsDialog from './pages/Rooms.jsx'
 import Room from './pages/Room.jsx'
-import { Arrow, Moon, Sun } from './components/icons.jsx'
+import Settings from './components/Settings.jsx'
+import { AccountButton } from './components/AccountDialog.jsx'
+import AccountPrompt from './components/Account.jsx'
+import { api } from './lib/api.js'
+import { useLinger } from './lib/linger.js'
 
 const store = {
   get: (k) => {
@@ -24,18 +27,46 @@ export { store }
 const Ctx = createContext(null)
 export const useApp = () => useContext(Ctx)
 
-export function navigate(path) {
-  window.location.hash = path
+// Plain paths (/r/<id>), no hash. Every route change goes through here or the back button.
+export function navigate(path, replace = false) {
+  if (path === window.location.pathname) return
+  window.history[replace ? 'replaceState' : 'pushState'](null, '', path)
+  window.dispatchEvent(new Event('navigate'))
 }
 
-function useHash() {
-  const [hash, setHash] = useState(() => window.location.hash.slice(1))
+// Old links used the hash (/#/r/<id>); move them over to the plain path.
+if (window.location.hash.startsWith('#/')) window.history.replaceState(null, '', window.location.hash.slice(1))
+
+// Links from the phone QR code carry a login: /r/<id>#login=<passphrase>. Take it off the address.
+const linkLogin = (() => {
+  const m = /^#login=(.+)$/.exec(window.location.hash)
+  if (!m) return null
+  window.history.replaceState(null, '', window.location.pathname + window.location.search)
+  return decodeURIComponent(m[1])
+})()
+
+// The logged in player, { id, name, passphrase }, kept in this browser.
+function readPlayer() {
+  try {
+    const p = JSON.parse(store.get('player'))
+    return p?.id && p.name ? p : null
+  } catch {
+    return null
+  }
+}
+
+function usePath() {
+  const [path, setPath] = useState(() => window.location.pathname)
   useEffect(() => {
-    const on = () => setHash(window.location.hash.slice(1))
-    window.addEventListener('hashchange', on)
-    return () => window.removeEventListener('hashchange', on)
+    const on = () => setPath(window.location.pathname)
+    window.addEventListener('popstate', on)
+    window.addEventListener('navigate', on)
+    return () => {
+      window.removeEventListener('popstate', on)
+      window.removeEventListener('navigate', on)
+    }
   }, [])
-  return hash
+  return path
 }
 
 const media = window.matchMedia('(prefers-color-scheme: dark)')
@@ -64,103 +95,147 @@ function useTheme() {
   return [theme, toggle]
 }
 
-export function ThemeButton() {
-  const { theme, toggleTheme } = useApp()
-  return (
-    <button className="icon-btn" onClick={toggleTheme} aria-label="Theme"
-      title={theme === 'dark' ? 'Light mode' : 'Dark mode'}>
-      {theme === 'dark' ? <Sun /> : <Moon />}
-    </button>
-  )
-}
-
-// Modal asking for a name. Shown only when the player tries something that needs one.
-function NamePrompt({ onDone, onCancel }) {
-  const [value, setValue] = useState('')
-  useEffect(() => {
-    const key = (e) => e.key === 'Escape' && onCancel()
-    window.addEventListener('keydown', key)
-    return () => window.removeEventListener('keydown', key)
-  }, [onCancel])
-  const submit = (e) => {
-    e.preventDefault()
-    const v = value.trim()
-    if (v) onDone(v.slice(0, 32))
-  }
-  return (
-    <div className="modal-bg" onPointerDown={(e) => e.target === e.currentTarget && onCancel()}>
-      <form className="modal" onSubmit={submit}>
-        <h1>Your name</h1>
-        <div className="row">
-          <input
-            className="text"
-            autoFocus
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder="Name"
-            maxLength={32}
-            aria-label="Name"
-            title="Name"
-          />
-          <button className="primary" disabled={!value.trim()} title="Continue">
-            Continue
-            <Arrow />
-          </button>
-        </div>
-      </form>
-    </div>
-  )
-}
-
 export default function App() {
-  const hash = useHash()
+  const path = usePath()
+  // The jigsaws window over the board: null, or which view it shows ('rooms' or 'new').
+  const [dialog, setDialog] = useState(null)
+  const [shownDialog, dialogClosing] = useLinger(dialog)
   const [theme, toggleTheme] = useTheme()
-  const [name, setNameState] = useState(() => store.get('name'))
-  const nameRef = useRef(name)
+  const [player, setPlayerState] = useState(readPlayer)
+  const playerRef = useRef(player)
   const [prompt, setPrompt] = useState(null)
-  const setName = useCallback((v) => {
-    store.set('name', v)
-    nameRef.current = v
-    setNameState(v)
+  const savePlayer = useCallback((p) => {
+    store.set('player', p ? JSON.stringify({ id: p.id, name: p.name, passphrase: p.passphrase }) : null)
+    playerRef.current = p
+    setPlayerState(p)
   }, [])
 
-  // Resolves with the player's name, asking for it first if needed (null if they cancel).
+  // Log in from a QR code link, and move browsers that only knew a name (from before passphrases)
+  // over to the player made for that name. The first such browser gets that player and is shown
+  // its new passphrase; any later one is asked to log in with it, or start fresh.
+  useEffect(() => {
+    if (linkLogin) api.login(linkLogin).then(savePlayer).catch(() => {})
+    const old = store.get('name')
+    if (!old) return
+    if (playerRef.current || linkLogin) return store.set('name', null)
+    const done = () => {}
+    api
+      .claim(old)
+      .then((p) => {
+        store.set('name', null)
+        if (playerRef.current) return
+        savePlayer(p)
+        setPrompt({ mode: 'show', player: p, resolve: done })
+      })
+      .catch((err) => {
+        if (err.message !== 'taken') return
+        store.set('name', null)
+        if (!playerRef.current) setPrompt({ mode: 'returning', name: old, resolve: done })
+      })
+  }, [savePlayer])
+
+  const setName = useCallback(
+    async (v) => {
+      const p = playerRef.current
+      if (!p) return
+      savePlayer({ ...(await api.rename(p.passphrase, v)), passphrase: p.passphrase })
+    },
+    [savePlayer],
+  )
+  const logout = useCallback(() => savePlayer(null), [savePlayer])
+
+  // Opens the sign up or log in prompt; resolves with the player's id, or null if they cancel.
+  const ask = useCallback(
+    (mode) =>
+      new Promise((resolve) =>
+        setPrompt((p) => {
+          p?.resolve(null)
+          return { mode, resolve }
+        }),
+      ),
+    [],
+  )
+
+  // Resolves with the player's id, asking for a name first if needed (null if they cancel).
   const requireName = useCallback(() => {
-    if (nameRef.current) return Promise.resolve(nameRef.current)
-    return new Promise((resolve) =>
-      setPrompt((p) => {
-        p?.resolve(null)
-        return { resolve }
-      }),
-    )
-  }, [])
+    if (playerRef.current) return Promise.resolve(playerRef.current.id)
+    return ask('name')
+  }, [ask])
+  const openLogin = useCallback(() => ask('login'), [ask])
 
-  // Synchronous check for event handlers: true if a name is set, otherwise opens the prompt.
+  // Synchronous check for event handlers: true if logged in, otherwise opens the prompt.
   const ensureName = useCallback(() => {
-    if (nameRef.current) return true
+    if (playerRef.current) return true
     requireName()
     return false
   }, [requireName])
 
+  const roomId = path.startsWith('/r/') ? path.slice(3) : null
+
+  // /rooms and /new open the jigsaws window over the last jigsaw; any other path goes to the last jigsaw.
+  // With no jigsaw to show, the list stays open over an empty table.
   useEffect(() => {
-    if (!hash) navigate(store.get('lastRoom') ? `/r/${store.get('lastRoom')}` : '/rooms')
-  }, [hash])
+    if (roomId) return
+    if (path === '/new') setDialog('new')
+    else if (path === '/rooms' || !store.get('lastRoom')) setDialog((d) => d || 'rooms')
+    const last = store.get('lastRoom')
+    navigate(last ? `/r/${last}` : '/', true)
+  }, [path, roomId])
 
-  const ctx = { theme, toggleTheme, name, setName, requireName, ensureName }
+  const openRoom = useCallback((id) => {
+    setDialog(null)
+    navigate(`/r/${id}`)
+  }, [])
 
-  let page = null
-  if (hash === '/new') page = <NewRoom />
-  else if (hash.startsWith('/r/')) page = <Room key={hash} id={hash.slice(3)} />
-  else if (hash) page = <RoomsPage />
+  const ctx = {
+    theme,
+    toggleTheme,
+    player,
+    playerId: player?.id || null,
+    // The player right now, for code that runs after an await (state in a closure may be stale).
+    currentPlayer: () => playerRef.current,
+    name: player?.name || null,
+    setName,
+    requireName,
+    ensureName,
+    openLogin,
+    logout,
+    roomId,
+    setDialog,
+    openRoom,
+  }
 
   return (
     <Ctx.Provider value={ctx}>
-      {page}
+      {roomId ? (
+        <Room key={roomId} id={roomId} />
+      ) : (
+        <div className="room">
+          <div className="float tr">
+            <AccountButton />
+            <Settings />
+          </div>
+        </div>
+      )}
+      {shownDialog && (
+        <RoomsDialog
+          view={shownDialog}
+          setView={setDialog}
+          closing={dialogClosing}
+          onClose={roomId ? () => setDialog(null) : null}
+        />
+      )}
       {prompt && (
-        <NamePrompt
-          onDone={(v) => {
-            setName(v)
-            prompt.resolve(v)
+        <AccountPrompt
+          key={prompt.mode}
+          mode={prompt.mode}
+          name={prompt.name}
+          player={prompt.player}
+          onSignUp={api.signUp}
+          onLogin={api.login}
+          onDone={(p) => {
+            savePlayer(p)
+            prompt.resolve(p.id)
             setPrompt(null)
           }}
           onCancel={() => {
