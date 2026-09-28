@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
 import { Engine } from '../lib/engine.js'
 import { ThemeButton, navigate, store, useApp } from '../App.jsx'
-import { Fit, Help as HelpIcon, Layers, Minus, Picture, Plus, Rooms, Users } from '../components/icons.jsx'
+import { Back, Fit, GitHub, Help as HelpIcon, Layers, Minus, Picture, Plus } from '../components/icons.jsx'
 import Help from '../components/Help.jsx'
 import Players from '../components/Players.jsx'
+import Reactions from '../components/Reactions.jsx'
 import Timers from '../components/Timers.jsx'
 import { NoteButton, NotesLayer } from '../components/Notes.jsx'
 
@@ -16,15 +17,44 @@ function Thumb({ engine, g, stamp }) {
   return <canvas ref={ref} />
 }
 
-function Sidebar({ engine, groups, open, ready }) {
+function Section({ title, count, empty, children }) {
+  return (
+    <section>
+      <h2>
+        {title}
+        <span className="n">{count}</span>
+      </h2>
+      {count ? children : <p className="side-empty">{empty}</p>}
+    </section>
+  )
+}
+
+function Sidebar({ engine, roomId, groups, notes, refs, open, ready }) {
   return (
     <aside className={`side${open ? ' open' : ''}`}>
-      {groups.map((grp) => (
-        <button key={grp.g} onClick={() => engine.focusGroup(grp.g)} title={`${grp.size} pieces`}>
-          <Thumb engine={engine} g={grp.g} stamp={`${grp.key}:${ready}`} />
-          <span className="n">{grp.size}</span>
-        </button>
-      ))}
+      <Section title="Groups" count={groups.length} empty="No pieces">
+        {groups.map((grp) => (
+          <button key={grp.g} onClick={() => engine.focusGroup(grp.g)} title={`${grp.size} pieces`}>
+            <Thumb engine={engine} g={grp.g} stamp={`${grp.key}:${ready}`} />
+            <span className="n">{grp.size}</span>
+          </button>
+        ))}
+      </Section>
+      <Section title="Notes" count={notes.length} empty="No notes yet">
+        {notes.map((n) => (
+          <button key={n.id} className="side-note" onClick={() => engine.focusNote(n.id)} title={n.author ? `Note by ${n.author}` : 'Note'}>
+            <span className="side-note-text">{n.text.trim() || 'Empty note'}</span>
+            {n.author && <span className="side-note-by">{n.author}</span>}
+          </button>
+        ))}
+      </Section>
+      <Section title="Images" count={refs.length} empty="No images yet">
+        {refs.map((r) => (
+          <button key={r.id} onClick={() => engine.focusRef(r.id)} title={r.author ? `Image added by ${r.author}` : 'Image'}>
+            <img src={api.imageUrl(roomId)} alt="" draggable={false} />
+          </button>
+        ))}
+      </Section>
     </aside>
   )
 }
@@ -61,11 +91,13 @@ export default function Room({ id }) {
   const [done, setDone] = useState(false)
   const timeBus = useRef(null)
   const noteBus = useRef(null)
+  const reactBus = useRef(null)
   const createNote = useRef(null)
   const [groups, setGroups] = useState([])
   const [stats, setStats] = useState(() => new Map())
   const [times, setTimes] = useState({})
   const [notes, setNotes] = useState([])
+  const [refs, setRefs] = useState([])
   const [players, setPlayers] = useState(() => store.get('players') === '1')
   // Shown automatically the first time this player opens each jigsaw.
   const [help, setHelp] = useState(() => !store.get(`help:${id}`))
@@ -103,6 +135,7 @@ export default function Room({ id }) {
           send: (msg) => sock?.send(msg),
           onRef: (ref, live) => api.saveRef(id, ref, live),
           onRefDelete: (refId) => api.deleteRef(id, refId),
+          onRefs: (list) => setRefs(list.map((r) => ({ id: r.id, author: r.author }))),
           onGroups: (g) => {
             setGroups(g)
             setStats(eng.contributors())
@@ -112,6 +145,7 @@ export default function Room({ id }) {
         })
         eng.setColors(readColors())
         setGroups(eng.groups())
+        setRefs(eng.refs.map((r) => ({ id: r.id, author: r.author })))
         setStats(eng.contributors())
         setDone(eng.isComplete())
         setData({ notes: room.notes || [], times: room.times || [] })
@@ -121,6 +155,7 @@ export default function Room({ id }) {
             if (msg.type === 'deleted') navigate('/rooms')
             else if (msg.type === 'time') timeBus.current?.(msg)
             else if (msg.type === 'note' || msg.type === 'note-delete') noteBus.current?.(msg)
+            else if (msg.type === 'react') reactBus.current?.(msg)
             else if (msg.type === 'ref') eng.remoteRef(msg.ref)
             else if (msg.type === 'ref-delete') eng.removeRef(msg.id, true)
             else eng.remoteMessage(msg)
@@ -182,24 +217,27 @@ export default function Room({ id }) {
         </div>
       )}
       <div className="float tl">
-        <button className="icon-btn" onClick={() => navigate('/rooms')} aria-label="Rooms" title="All jigsaws">
-          <Rooms />
+        <button className="icon-btn" onClick={() => navigate('/rooms')} aria-label="Back" title="Back to all jigsaws">
+          <Back />
         </button>
-        <button className={`icon-btn${side ? ' on' : ''}`} onClick={() => setSide((s) => !s)} aria-label="Groups" title="Groups">
+      </div>
+      <div className="float tl2">
+        <button className={`icon-btn${side ? ' on' : ''}`} onClick={() => setSide((s) => !s)} aria-label="Overview" title="Groups, notes and images">
           <Layers />
-        </button>
-        <button
-          className={`icon-btn${players ? ' on' : ''}`}
-          onClick={() => setPlayers((s) => !s)}
-          aria-label="Players"
-          title="Players"
-        >
-          <Users />
         </button>
       </div>
       {engine && (
         <div className="float tc">
-          <Timers roomId={id} name={name} initial={data.times} busRef={timeBus} stopped={done} onTimes={onTimes} />
+          <Reactions engine={engine} busRef={reactBus} />
+          <span className="sep" />
+          <button
+            className={`stats-btn${players ? ' on' : ''}`}
+            onClick={() => setPlayers((s) => !s)}
+            aria-pressed={players}
+            title={players ? 'Hide players' : 'Show players'}
+          >
+            <Timers roomId={id} name={name} initial={data.times} busRef={timeBus} stopped={done} onTimes={onTimes} />
+          </button>
           <span className="sep" />
           <NoteButton createRef={createNote} />
           <button
@@ -230,6 +268,16 @@ export default function Room({ id }) {
         <button className="icon-btn" onClick={() => setHelp(true)} aria-label="How to play" title="How to play">
           <HelpIcon />
         </button>
+        <a
+          className="icon-btn"
+          href="https://github.com/mebn/jigsaw"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="GitHub"
+          title="GitHub"
+        >
+          <GitHub />
+        </a>
         <ThemeButton />
       </div>
       {help && <Help onClose={closeHelp} />}
@@ -244,7 +292,9 @@ export default function Room({ id }) {
           <Plus />
         </button>
       </div>
-      {engine && <Sidebar engine={engine} groups={groups} open={side} ready={ready} />}
+      {engine && (
+        <Sidebar engine={engine} roomId={id} groups={groups} notes={notes} refs={refs} open={side} ready={ready} />
+      )}
       {engine && <Players open={players} stats={stats} times={times} notes={notes} me={name} />}
     </div>
   )

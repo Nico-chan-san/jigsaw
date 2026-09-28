@@ -33,7 +33,7 @@ const cursorColor = (id) => {
 }
 
 export class Engine {
-  constructor(canvas, { room, image, pieces, refs, overlay, user, guard, tooltip, send, onGroups, onComplete, onReady, onRef, onRefDelete }) {
+  constructor(canvas, { room, image, pieces, refs, overlay, user, guard, tooltip, send, onGroups, onComplete, onReady, onRef, onRefDelete, onRefs }) {
     this.canvas = canvas
     this.ctx = canvas.getContext('2d')
     this.layer = document.createElement('canvas')
@@ -65,6 +65,8 @@ export class Engine {
     // Reference image changes: onRef(ref, live) while and after editing, onRefDelete(id).
     this.onRef = onRef
     this.onRefDelete = onRefDelete
+    // Called with the image list whenever an image is added or removed.
+    this.onRefs = onRefs
 
     this.geo = buildPuzzle(room)
     const n = (this.n = room.cols * room.rows)
@@ -310,6 +312,18 @@ export class Engine {
 
   focusGroup(gid) {
     this.frame(this.bbox(this.members(gid)), 0.6)
+  }
+
+  focusRef(id) {
+    const ref = this.refs.find((r) => r.id === id)
+    if (!ref) return
+    const [w, h] = this.refSize(ref)
+    this.frame({ x0: ref.x - w / 2, y0: ref.y - h / 2, x1: ref.x + w / 2, y1: ref.y + h / 2 }, 0.6)
+  }
+
+  focusNote(id) {
+    const n = this.notes?.get().find((n) => n.id === id)
+    if (n) this.frame({ x0: n.x, y0: n.y, x1: n.x + n.w, y1: n.y + n.h }, 0.4)
   }
 
   saveCam() {
@@ -811,7 +825,8 @@ export class Engine {
       return this.removeRef(this.refSel)
     }
     if (!this.drag) return
-    const dir = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key]
+    const plainR = (e.key === 'r' || e.key === 'R') && !e.ctrlKey && !e.metaKey && !e.altKey
+    const dir = plainR ? 1 : { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key]
     if (!dir) return
     e.preventDefault()
     if (!e.repeat) this.spin(dir)
@@ -1283,6 +1298,7 @@ export class Engine {
     this.refs.push(ref)
     this.selectRef(ref.id)
     this.onRef?.(ref, false)
+    this.onRefs?.(this.refs)
   }
 
   removeRef(id, remote = false) {
@@ -1292,6 +1308,7 @@ export class Engine {
     this.selRefs.delete(id)
     if (this.refDrag?.ref.id === id) this.refDrag = null
     if (!remote) this.onRefDelete?.(id)
+    this.onRefs?.(this.refs)
     this.invalidate()
   }
 
@@ -1300,7 +1317,10 @@ export class Engine {
     if (this.refDrag?.ref.id === ref.id || this.carry?.refs.some((r) => r.id === ref.id)) return
     const cur = this.refs.find((r) => r.id === ref.id)
     if (cur) Object.assign(cur, ref)
-    else this.refs.push(ref)
+    else {
+      this.refs.push(ref)
+      this.onRefs?.(this.refs)
+    }
     this.invalidate()
   }
 
@@ -1309,6 +1329,7 @@ export class Engine {
     this.refs = refs.map((r) => (dragging && r.id === dragging.id ? dragging : r))
     if (this.refSel && !this.refs.some((r) => r.id === this.refSel)) this.refSel = null
     for (const id of this.selRefs) if (!this.refs.some((r) => r.id === id)) this.selRefs.delete(id)
+    this.onRefs?.(this.refs)
     this.invalidate()
   }
 

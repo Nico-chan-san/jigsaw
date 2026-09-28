@@ -94,6 +94,7 @@ button {
   border: 0;
   border-radius: 8px;
   background: transparent;
+  color: inherit;
   transition: background 0.15s;
 }
 .icon-btn:hover {
@@ -123,6 +124,11 @@ button {
 .float.tl {
   top: 16px;
   left: 16px;
+}
+/* Sits to the right of the back button (16px + its 44px panel + an 8px gap). */
+.float.tl2 {
+  top: 16px;
+  left: 68px;
 }
 .float.tr {
   top: 16px;
@@ -739,6 +745,62 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
+.side section + section {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.side h2 {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 2px 4px 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.side h2 .n {
+  position: static;
+}
+.side-empty {
+  margin: 0 4px 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.side img {
+  max-width: 100%;
+  max-height: 120px;
+  border-radius: 2px;
+}
+.side button.side-note {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-height: 0;
+  color: #1c1a0e;
+  background: var(--note);
+  text-align: left;
+}
+.side button.side-note:hover {
+  background: var(--note);
+  filter: brightness(0.95);
+}
+.side-note-text {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.side-note-by {
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 11px;
+}
 
 .center {
   display: grid;
@@ -818,6 +880,90 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 .float.tc .icon-btn {
   cursor: grab;
   touch-action: none;
+}
+
+/* The time readout doubles as the players panel toggle. */
+.stats-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  transition: background 0.15s;
+}
+.stats-btn .stat {
+  cursor: pointer;
+}
+.stats-btn:hover {
+  background: var(--hover);
+}
+.stats-btn.on {
+  background: var(--fg);
+  color: var(--bg);
+}
+.stats-btn.on .stat svg {
+  color: inherit;
+  opacity: 0.7;
+}
+
+/* ---- reactions ---- */
+
+.react-pick {
+  position: relative;
+  display: inline-flex;
+}
+.float.tc .react-pick .icon-btn {
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.react-emoji {
+  font-size: 18px;
+  line-height: 1;
+}
+.icon-btn.on .react-emoji {
+  filter: drop-shadow(0 0 1px var(--bg));
+}
+.react-menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px var(--shadow);
+  transform: translateX(-50%);
+  transform-origin: top center;
+  animation: react-drop 0.14s ease-out;
+}
+.react-menu .react-emoji {
+  font-size: 20px;
+}
+@keyframes react-drop {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-6px) scaleY(0.9);
+  }
+}
+.reactions {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  overflow: hidden;
+  pointer-events: none;
+}
+.reaction {
+  position: absolute;
+  top: 0;
+  left: 0;
+  font-size: 28px;
+  line-height: 1;
+  user-select: none;
+  will-change: transform, opacity;
 }
 
 .notes {

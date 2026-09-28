@@ -236,6 +236,8 @@ function createApi(dbFile) {
         broadcast(roomId, { type: 'moves', client, pieces: m.pieces }, ws)
       } else if (m.type === 'grab' || m.type === 'live' || m.type === 'cursor') {
         broadcast(roomId, { ...m, client }, ws)
+      } else if (m.type === 'react' && isFinite(m.x) && isFinite(m.y)) {
+        broadcast(roomId, { type: 'react', client, kind: String(m.kind || '').slice(0, 16), x: +m.x, y: +m.y }, ws)
       } else if (m.type === 'note' || m.type === 'ref') {
         const item = (m.type === 'note' ? putNote : putRef)(roomId, m[m.type], !!m.live)
         if (item) broadcast(roomId, { type: m.type, client, live: !!m.live, [m.type]: item }, ws)
