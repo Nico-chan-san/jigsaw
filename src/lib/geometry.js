@@ -229,6 +229,20 @@ export function scatter({ cols, rows, width, height, seed }) {
   })
 }
 
+// Tips every piece out in one overlapping heap in the middle, like emptying the box onto
+// the table: denser towards the centre, random quarter turns, about half of them face down.
+export function pile({ cols, rows, width, height, seed }) {
+  const n = cols * rows
+  const size = Math.max(width / cols, height / rows)
+  const r = rng(seed ^ 0x51ed2701)
+  const R = Math.sqrt(n) * size * 0.45
+  return Array.from({ length: n }, (_, i) => {
+    const a = r() * 2 * Math.PI
+    const d = R * Math.sqrt(r()) * (0.35 + 0.65 * r())
+    return { i, x: Math.cos(a) * d, y: Math.sin(a) * d, r: Math.floor(r() * 4), g: i, f: r() < 0.5 ? 1 : 0 }
+  })
+}
+
 // SVG path for a single sample piece (used by the shape picker icon).
 export function samplePiecePath(shape, size = 100) {
   const profile = profiles[shape] || profiles.classic

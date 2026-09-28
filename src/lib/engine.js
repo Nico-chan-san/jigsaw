@@ -13,6 +13,10 @@ const ease = (dt, ms) => 1 - Math.exp(-dt / ms)
 const r2 = (v) => Math.round(v * 100) / 100
 // Live drag updates are throttled to this interval (ms).
 const LIVE_MS = 33
+// Length of the flip animation (ms), and how far a press may move and still count as a click.
+const FLIP_MS = 420
+const CLICK_PX = 5
+const CLICK_MS = 400
 // Largest side of the cached sprite for a lifted selection.
 const LIFT_MAX = 3000
 // Screen-space size of reference image handles.
@@ -70,6 +74,10 @@ export class Engine {
     this.r = new Int8Array(n)
     this.g = new Int32Array(n)
     this.by = new Array(n).fill(null)
+    // Face down pieces (annoying mode), their back sprites, and flips in progress: i -> start time.
+    this.f = new Uint8Array(n)
+    this.backs = new Array(n)
+    this.flips = new Map()
     this.hl = null
     // Selected pieces; always whole groups.
     this.sel = new Set()
@@ -85,6 +93,7 @@ export class Engine {
       this.r[p.i] = p.r
       this.g[p.i] = p.g
       this.by[p.i] = p.by || null
+      this.f[p.i] = p.f ? 1 : 0
     }
     const sizes = new Map()
     for (let i = 0; i < n; i++) sizes.set(this.g[i], (sizes.get(this.g[i]) || 0) + 1)
@@ -415,6 +424,51 @@ export class Engine {
     return c
   }
 
+  // The back of a piece: plain cardboard in the same outline. It is drawn mirrored, see face().
+  makeBack(i) {
+    const { w, h, S } = this.geo
+    const m = this.margin
+    const sc = this.spriteScale
+    const path = this.paths[i]
+    const c = document.createElement('canvas')
+    c.width = Math.ceil((w + 2 * m) * sc)
+    c.height = Math.ceil((h + 2 * m) * sc)
+    const ctx = c.getContext('2d')
+    ctx.setTransform(sc, 0, 0, sc, c.width / 2, c.height / 2)
+    ctx.shadowColor = 'rgba(0,0,0,0.32)'
+    ctx.shadowBlur = S * 0.05 * sc
+    ctx.fillStyle = '#cdbd9f'
+    ctx.fill(path)
+    ctx.shadowColor = 'transparent'
+    ctx.save()
+    ctx.clip(path)
+    ctx.lineWidth = S * 0.04
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)'
+    ctx.stroke(path)
+    ctx.restore()
+    ctx.lineWidth = 1 / sc
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)'
+    ctx.stroke(path)
+    return c
+  }
+
+  // What to draw for piece i: its sprite, the horizontal scale in the piece's own frame and an
+  // extra lift. Face down pieces are mirrored (sx = -1), as a real piece turned over is. A flip in
+  // progress squeezes the piece through its edge and swaps sprites halfway.
+  face(i, still = false) {
+    let sx = this.f[i] ? -1 : 1
+    let lift = 1
+    const t0 = still ? undefined : this.flips.get(i)
+    if (t0 !== undefined) {
+      const p = Math.min(1, (performance.now() - t0) / FLIP_MS)
+      const e = p < 0.5 ? 2 * p * p : 1 - 2 * (1 - p) * (1 - p)
+      sx = -sx * Math.cos(Math.PI * e)
+      lift = 1 + 0.18 * Math.sin(Math.PI * e)
+    }
+    const sp = sx >= 0 ? this.sprites[i] : (this.backs[i] ??= this.makeBack(i))
+    return { sp, sx, lift }
+  }
+
   hit(wx, wy) {
     const R = this.radius
     for (let k = this.order.length - 1; k >= 0; k--) {
@@ -422,7 +476,8 @@ export class Engine {
       const dx = wx - this.x[i]
       const dy = wy - this.y[i]
       if (dx > R || dx < -R || dy > R || dy < -R) continue
-      const [lx, ly] = rot(dx, dy, -this.r[i])
+      const [rx, ly] = rot(dx, dy, -this.r[i])
+      const lx = this.f[i] ? -rx : rx
       if (this.hitCtx.isPointInPath(this.paths[i], lx, ly)) return i
     }
     return -1
@@ -503,8 +558,10 @@ export class Engine {
     if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, [sx, sy])
 
     if (this.drag && e.pointerId === this.drag.pointer) {
-      this.drag.sx = sx
-      this.drag.sy = sy
+      const d = this.drag
+      d.sx = sx
+      d.sy = sy
+      if (Math.hypot(sx - d.sx0, sy - d.sy0) > CLICK_PX) d.moved = true
       this.updatePivot()
       this.sendLive()
       this.invalidate(false)
@@ -544,7 +601,12 @@ export class Engine {
 
   onUp(e) {
     this.pointers.delete(e.pointerId)
-    if (this.drag && e.pointerId === this.drag.pointer) this.drop()
+    if (this.drag && e.pointerId === this.drag.pointer) {
+      const d = this.drag
+      const click = this.room.annoying && d.ids.length === 1 && !d.moved && performance.now() - d.t0 < CLICK_MS
+      this.drop()
+      if (click) this.flip(d.ids[0])
+    }
     if (this.pan && e.pointerId === this.pan.pointer) {
       this.pan = null
       this.canvas.style.cursor = ''
@@ -686,7 +748,13 @@ export class Engine {
       cy: new Float64Array(ids.length),
       sa: new Float64Array(ids.length),
       spinning: false,
+      // A press that neither moves nor turns anything is a click (flips a piece in annoying mode).
+      t0: performance.now(),
+      sx0: sx,
+      sy0: sy,
+      moved: false,
     }
+    for (const i of ids) this.flips.delete(i)
     const keep = this.lift && this.lift.ids.length === ids.length && set.has(this.lift.ids[0])
     this.lift = { ids, set, value: keep ? this.lift.value : 0, target: 1, px: wx, py: wy, angle: 0 }
     this.buildLiftSprite()
@@ -721,12 +789,12 @@ export class Engine {
     const ctx = c.getContext('2d')
     const sc = this.spriteScale
     for (let j = 0; j < d.ids.length; j++) {
-      const sp = this.sprites[d.ids[j]]
+      const { sp, sx } = this.face(d.ids[j], true)
       if (!sp) continue
       const a = d.r0[j] * Q
       const co = Math.cos(a) * res
       const sn = Math.sin(a) * res
-      ctx.setTransform(co, sn, -sn, co, (d.ox[j] - x0) * res, (d.oy[j] - y0) * res)
+      ctx.setTransform(co * sx, sn * sx, -sn, co, (d.ox[j] - x0) * res, (d.oy[j] - y0) * res)
       const w = sp.width / sc
       const h = sp.height / sc
       ctx.drawImage(sp, -w / 2, -h / 2, w, h)
@@ -779,6 +847,7 @@ export class Engine {
       }
     }
     d.spinning = true
+    d.moved = true
     this.buildLiftSprite()
     // Other players get the new offsets as a fresh grab that keeps the current turn.
     this.send({ type: 'grab', ids: d.ids, ox: d.ox.map(r2), oy: d.oy.map(r2), r0: d.r0, px: r2(d.px), py: r2(d.py), k: d.k })
@@ -857,7 +926,7 @@ export class Engine {
     this.canvas.style.cursor = ''
     this.send({
       type: 'moves',
-      pieces: [...changed].map((i) => ({ i, x: this.x[i], y: this.y[i], r: this.r[i], g: this.g[i], by: this.by[i] })),
+      pieces: [...changed].map((i) => ({ i, x: this.x[i], y: this.y[i], r: this.r[i], g: this.g[i], by: this.by[i], f: this.f[i] })),
     })
     this.emitGroups()
     this.invalidate()
@@ -865,6 +934,17 @@ export class Engine {
       this.onComplete?.()
       setTimeout(() => this.fit(), 250)
     }
+  }
+
+  // Turns a loose piece over. Pieces in a module are always face up, so they stay put.
+  flip(i) {
+    if (this.connected(i)) return
+    this.f[i] ^= 1
+    this.flips.set(i, performance.now())
+    // The landing sprite still shows the old side; draw the piece itself so the flip is visible.
+    if (this.lift?.set.has(i)) this.lift.sprite = null
+    this.send({ type: 'moves', pieces: [{ i, x: this.x[i], y: this.y[i], r: this.r[i], g: this.g[i], f: this.f[i] }] })
+    this.invalidate()
   }
 
   snap(ids) {
@@ -884,7 +964,8 @@ export class Engine {
       return out
     }
     const gap = (p, q) => {
-      if (this.r[p] !== this.r[q]) return null
+      // Face down pieces never connect.
+      if (this.r[p] !== this.r[q] || this.f[p] || this.f[q]) return null
       const dc = (q % cols) - (p % cols)
       const dr = ((q / cols) | 0) - ((p / cols) | 0)
       const [ex, ey] = rot(dc * w, dr * h, this.r[p])
@@ -1015,6 +1096,10 @@ export class Engine {
       this.r[p.i] = p.r
       this.g[p.i] = p.g
       if (p.by !== undefined && p.by !== null) this.by[p.i] = p.by
+      if (p.f !== undefined && p.f !== null && (p.f ? 1 : 0) !== this.f[p.i]) {
+        this.f[p.i] = p.f ? 1 : 0
+        this.flips.set(p.i, performance.now())
+      }
       touched.add(p.i)
     }
     if (touched.size) this.toTop(touched)
@@ -1027,7 +1112,8 @@ export class Engine {
   // After a reconnect: catch up on whatever changed while the socket was down.
   resync(pieces) {
     const list = pieces.filter(
-      (p) => p.x !== this.x[p.i] || p.y !== this.y[p.i] || p.r !== this.r[p.i] || p.g !== this.g[p.i],
+      (p) =>
+        p.x !== this.x[p.i] || p.y !== this.y[p.i] || p.r !== this.r[p.i] || p.g !== this.g[p.i] || (p.f ? 1 : 0) !== this.f[p.i],
     )
     if (list.length) this.applyRemote(list)
   }
@@ -1268,6 +1354,12 @@ export class Engine {
     if (this.cursors.size) {
       clearTimeout(this.idleTimer)
       this.idleTimer = setTimeout(() => this.invalidate(false), CURSOR_IDLE + 100)
+    }
+
+    if (this.flips.size) {
+      this.sceneVer++
+      for (const [i, t0] of this.flips) if (now - t0 >= FLIP_MS) this.flips.delete(i)
+      again = true
     }
 
     if (this.moving.size) this.sceneVer++
@@ -1598,7 +1690,8 @@ export class Engine {
       const a = this.r[i] * Q
       const co = Math.cos(a) * z
       const sn = Math.sin(a) * z
-      c.setTransform(co, sn, -sn, co, ((this.x[i] - cam.x) * cam.z + vw / 2) * dpr, ((this.y[i] - cam.y) * cam.z + vh / 2) * dpr)
+      const sx = this.f[i] ? -1 : 1
+      c.setTransform(co * sx, sn * sx, -sn, co, ((this.x[i] - cam.x) * cam.z + vw / 2) * dpr, ((this.y[i] - cam.y) * cam.z + vh / 2) * dpr)
     }
     c.setTransform(1, 0, 0, 1, 0, 0)
     c.clearRect(0, 0, this.hlLayer.width, this.hlLayer.height)
@@ -1622,13 +1715,13 @@ export class Engine {
   }
 
   drawPiece(ctx, i, x, y, a, s, sc) {
-    const sp = this.sprites[i]
+    const { sp, sx, lift } = this.face(i)
     if (!sp) return
     const { cam, dpr, vw, vh } = this
-    const z = cam.z * dpr * s
+    const z = cam.z * dpr * s * lift
     const c = Math.cos(a) * z
     const sn = Math.sin(a) * z
-    ctx.setTransform(c, sn, -sn, c, ((x - cam.x) * cam.z + vw / 2) * dpr, ((y - cam.y) * cam.z + vh / 2) * dpr)
+    ctx.setTransform(c * sx, sn * sx, -sn, c, ((x - cam.x) * cam.z + vw / 2) * dpr, ((y - cam.y) * cam.z + vh / 2) * dpr)
     const w = sp.width / sc
     const h = sp.height / sc
     ctx.drawImage(sp, -w / 2, -h / 2, w, h)

@@ -8,6 +8,7 @@ const SECTIONS = [
     title: 'Mouse',
     rows: [
       [<Key key="lp">Left drag on a piece</Key>, 'Pick up the piece (or its whole module) and move it'],
+      [<Key key="lc">Click a piece</Key>, 'In annoying mode, flip a loose piece over'],
       [<Key key="lt">Left drag on the table</Key>, 'Draw a box to select several pieces'],
       [<Key key="ls">Left drag on a selection</Key>, 'Move all the selected pieces at once'],
       [<Key key="r">Right drag</Key>, 'Move around the table'],
@@ -32,6 +33,7 @@ const SECTIONS = [
     title: 'Touch screens',
     rows: [
       [<Key key="tp">Drag a piece</Key>, 'Move it'],
+      [<Key key="tc">Tap a piece</Key>, 'In annoying mode, flip a loose piece over'],
       [<Key key="tt">Drag the table</Key>, 'Move around the table; pinch to zoom'],
       [<Key key="t2">2nd finger</Key>, 'While holding pieces, tap with a second finger to rotate them in place'],
     ],

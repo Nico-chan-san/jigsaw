@@ -589,6 +589,65 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   max-height: 40px;
 }
 
+.toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--field);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  transition: border-color 0.15s;
+}
+.toggle:hover {
+  border-color: var(--line-strong);
+}
+.toggle:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 4px var(--ring);
+}
+.toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.toggle-hint {
+  color: var(--muted);
+  font-size: 13px;
+}
+.toggle-track {
+  flex: none;
+  position: relative;
+  width: 40px;
+  height: 24px;
+  border-radius: 12px;
+  background: var(--line-strong);
+  transition: background 0.2s;
+}
+.toggle-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s;
+}
+.toggle.on .toggle-track {
+  background: var(--fg);
+}
+.toggle.on .toggle-knob {
+  transform: translateX(16px);
+}
+
 @media (max-width: 480px) {
   .shapes {
     grid-template-columns: repeat(3, 1fr);
@@ -822,7 +881,7 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   outline: 0;
   background: transparent;
   color: inherit;
-  font-size: calc(var(--u) * 0.17);
+  font-size: calc(var(--u) * 0.25);
   line-height: 1.35;
   resize: none;
 }

@@ -125,18 +125,18 @@ function createApi(dbFile) {
       FROM rooms r LEFT JOIN pieces p ON p.room_id = r.id
       GROUP BY r.id ORDER BY r.created DESC`),
     room: db.prepare(
-      'SELECT id, name, created, cols, rows, shape, seed, width, height FROM rooms WHERE id = ?',
+      'SELECT id, name, created, cols, rows, shape, seed, width, height, annoying FROM rooms WHERE id = ?',
     ),
     image: db.prepare('SELECT image, image_type FROM rooms WHERE id = ?'),
-    pieces: db.prepare('SELECT idx AS i, x, y, r, g, by FROM pieces WHERE room_id = ? ORDER BY idx'),
+    pieces: db.prepare('SELECT idx AS i, x, y, r, g, by, f FROM pieces WHERE room_id = ? ORDER BY idx'),
     insertRoom: db.prepare(`
-      INSERT INTO rooms (id, name, created, cols, rows, shape, seed, width, height, image, image_type, thumb)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+      INSERT INTO rooms (id, name, created, cols, rows, shape, seed, width, height, image, image_type, thumb, annoying)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     insertPiece: db.prepare(
-      'INSERT INTO pieces (room_id, idx, x, y, r, g, by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO pieces (room_id, idx, x, y, r, g, by, f) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     ),
     updatePiece: db.prepare(
-      'UPDATE pieces SET x = ?, y = ?, r = ?, g = ?, by = COALESCE(?, by) WHERE room_id = ? AND idx = ?',
+      'UPDATE pieces SET x = ?, y = ?, r = ?, g = ?, by = COALESCE(?, by), f = COALESCE(?, f) WHERE room_id = ? AND idx = ?',
     ),
     deleteRoom: db.prepare('DELETE FROM rooms WHERE id = ?'),
     deletePieces: db.prepare('DELETE FROM pieces WHERE room_id = ?'),
@@ -182,7 +182,7 @@ function createApi(dbFile) {
 
   function saveMoves(roomId, pieces) {
     tx(() => {
-      for (const p of pieces) q.updatePiece.run(p.x, p.y, p.r, p.g, p.by ?? null, roomId, p.i)
+      for (const p of pieces) q.updatePiece.run(p.x, p.y, p.r, p.g, p.by ?? null, p.f == null ? null : p.f ? 1 : 0, roomId, p.i)
     })
   }
 
@@ -307,8 +307,9 @@ function createApi(dbFile) {
               Buffer.from(m[2], 'base64'),
               m[1],
               String(b.thumb || ''),
+              b.annoying ? 1 : 0,
             )
-            for (const p of b.pieces) q.insertPiece.run(id, p.i, p.x, p.y, p.r, p.g, null)
+            for (const p of b.pieces) q.insertPiece.run(id, p.i, p.x, p.y, p.r, p.g, null, p.f ? 1 : 0)
           })
           return send(res, 200, { id })
         }

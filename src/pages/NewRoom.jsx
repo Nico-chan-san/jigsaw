@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
-import { SHAPES, buildPuzzle, gridFor, outlinePath, samplePiecePath, scatter } from '../lib/geometry.js'
+import { SHAPES, buildPuzzle, gridFor, outlinePath, pile, samplePiecePath, scatter } from '../lib/geometry.js'
 import { ThemeButton, navigate, useApp } from '../App.jsx'
 import { Arrow, Back, Upload } from '../components/icons.jsx'
 
@@ -85,6 +85,7 @@ export default function NewRoom() {
   const [name, setName] = useState('')
   const [slider, setSlider] = useState(55)
   const [shape, setShape] = useState('classic')
+  const [annoying, setAnnoying] = useState(false)
   const [over, setOver] = useState(false)
   const [busy, setBusy] = useState(false)
   const [link, setLink] = useState('')
@@ -148,7 +149,8 @@ export default function NewRoom() {
         name: name.trim() || 'Jigsaw',
         image: full.data,
         thumb: thumb.data,
-        pieces: scatter(room),
+        annoying,
+        pieces: annoying ? pile(room) : scatter(room),
       })
       navigate(`/r/${id}`)
     } catch {
@@ -266,6 +268,25 @@ export default function NewRoom() {
               </button>
             ))}
           </div>
+        </section>
+
+        <section className="field">
+          <h2 className="label">Mode</h2>
+          <button
+            className={`toggle${annoying ? ' on' : ''}`}
+            role="switch"
+            aria-checked={annoying}
+            onClick={() => setAnnoying((v) => !v)}
+            title="Annoying mode"
+          >
+            <span className="toggle-text">
+              <span>Annoying mode</span>
+              <span className="toggle-hint">All pieces start in one messy pile, many face down. Click a piece to flip it.</span>
+            </span>
+            <span className="toggle-track" aria-hidden="true">
+              <span className="toggle-knob" />
+            </span>
+          </button>
         </section>
 
         <button
