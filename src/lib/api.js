@@ -18,10 +18,21 @@ export const api = {
   signUp: (name) => post('/api/players', { name }),
   claim: (name) => post('/api/players/claim', { name }),
   login: (passphrase) => post('/api/players/login', { passphrase }),
+  // With an email, the player's passphrase field holds this device's login token instead.
+  loginEmail: (email, password) => post('/api/players/email-login', { email, password }),
+  useEmail: (passphrase, email, password) => post('/api/players/email', { passphrase, email, password }),
   rename: (passphrase, name) => post('/api/players/rename', { passphrase, name }),
   lan: () => fetch('/api/lan').then(json),
-  rooms: () => fetch('/api/rooms').then(json),
+  // Private jigsaws are only listed for the player who opened them, known by their passphrase.
+  rooms: (passphrase) => fetch('/api/rooms', { headers: passphrase ? { 'X-Passphrase': passphrase } : {} }).then(json),
   room: (id) => fetch(`/api/rooms/${id}`).then(json),
+  // Players with an email who can be invited to a private jigsaw, as [{ id, name, joined }].
+  invitable: (passphrase, room = '') =>
+    fetch(`/api/players/invitable?room=${encodeURIComponent(room)}`, { headers: { 'X-Passphrase': passphrase } }).then(
+      json,
+    ),
+  invite: (id, passphrase, players) => post(`/api/rooms/${id}/invite`, { passphrase, players }),
+  join: (id, passphrase) => post(`/api/rooms/${id}/join`, { passphrase }),
   imageUrl: (id) => `/api/rooms/${id}/image`,
   create: (body) =>
     fetch('/api/rooms', {

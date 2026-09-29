@@ -45,7 +45,8 @@ const linkLogin = (() => {
   return decodeURIComponent(m[1])
 })()
 
-// The logged in player, { id, name, passphrase }, kept in this browser.
+// The logged in player, { id, name, passphrase, email }, kept in this browser. For a player who
+// switched to an email and password, passphrase is this device's login token, never shown.
 function readPlayer() {
   try {
     const p = JSON.parse(store.get('player'))
@@ -105,7 +106,10 @@ export default function App() {
   const playerRef = useRef(player)
   const [prompt, setPrompt] = useState(null)
   const savePlayer = useCallback((p) => {
-    store.set('player', p ? JSON.stringify({ id: p.id, name: p.name, passphrase: p.passphrase }) : null)
+    store.set(
+      'player',
+      p ? JSON.stringify({ id: p.id, name: p.name, passphrase: p.passphrase, email: p.email || null }) : null,
+    )
     playerRef.current = p
     setPlayerState(p)
   }, [])
@@ -115,6 +119,13 @@ export default function App() {
   // its new passphrase; any later one is asked to log in with it, or start fresh.
   useEffect(() => {
     if (linkLogin) api.login(linkLogin).then(savePlayer).catch(() => {})
+    // Check the saved login still works: a passphrase stops working once its player switches to
+    // an email on another device.
+    else if (playerRef.current)
+      api
+        .login(playerRef.current.passphrase)
+        .then((p) => playerRef.current && savePlayer(p))
+        .catch((err) => err.message === 'unknown passphrase' && savePlayer(null))
     const old = store.get('name')
     if (!old) return
     if (playerRef.current || linkLogin) return store.set('name', null)
@@ -138,11 +149,19 @@ export default function App() {
     async (v) => {
       const p = playerRef.current
       if (!p) return
-      savePlayer({ ...(await api.rename(p.passphrase, v)), passphrase: p.passphrase })
+      savePlayer({ ...(await api.rename(p.passphrase, v)), passphrase: p.passphrase, email: p.email })
     },
     [savePlayer],
   )
   const logout = useCallback(() => savePlayer(null), [savePlayer])
+  // Switch this player's login from their passphrase to an email and password.
+  const switchToEmail = useCallback(
+    async (email, password) => {
+      const p = playerRef.current
+      if (p) savePlayer(await api.useEmail(p.passphrase, email, password))
+    },
+    [savePlayer],
+  )
 
   // Opens the sign up or log in prompt; resolves with the player's id, or null if they cancel.
   const ask = useCallback(
@@ -200,6 +219,7 @@ export default function App() {
     ensureName,
     openLogin,
     logout,
+    switchToEmail,
     roomId,
     setDialog,
     openRoom,
@@ -233,6 +253,7 @@ export default function App() {
           player={prompt.player}
           onSignUp={api.signUp}
           onLogin={api.login}
+          onLoginEmail={api.loginEmail}
           onDone={(p) => {
             savePlayer(p)
             prompt.resolve(p.id)

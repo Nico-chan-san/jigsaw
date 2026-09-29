@@ -41,6 +41,63 @@ export function Passphrase({ value }) {
   )
 }
 
+// Email and password fields with a submit button. onSubmit(email, password) rejects with the
+// reason it failed, which is shown under the fields. With create, the password is a new one.
+export function EmailForm({ action, create = false, onSubmit }) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const submit = async (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!email.trim() || !password || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await onSubmit(email.trim(), password)
+    } catch (err) {
+      setError(err.message || 'Something went wrong, try again')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form className="email-form" onSubmit={submit}>
+      <input
+        className={`text${error ? ' bad' : ''}`}
+        type="email"
+        autoFocus
+        value={email}
+        onChange={(e) => (setEmail(e.target.value), setError(''))}
+        placeholder="Email"
+        autoCapitalize="none"
+        autoComplete="email"
+        spellCheck={false}
+        maxLength={254}
+        aria-label="Email"
+        title="Email"
+      />
+      <input
+        className={`text${error ? ' bad' : ''}`}
+        type="password"
+        value={password}
+        onChange={(e) => (setPassword(e.target.value), setError(''))}
+        placeholder={create ? 'Password, at least 8 characters' : 'Password'}
+        autoComplete={create ? 'new-password' : 'current-password'}
+        aria-label="Password"
+        title="Password"
+      />
+      {error && <p className="modal-error">{error[0].toUpperCase() + error.slice(1)}</p>}
+      <button className="primary wide" disabled={!email.trim() || !password || busy} title={action}>
+        {busy ? <span className="spin" /> : action}
+        {!busy && <Arrow />}
+      </button>
+    </form>
+  )
+}
+
 // True for a name that is four words with spaces between, like a passphrase.
 export const looksLikePassphrase = (name) => /^\s*[a-z]+(\s+[a-z]+){3}\s*$/i.test(name)
 
@@ -57,8 +114,9 @@ export function PassphraseWarning({ value }) {
 // Modal for signing up with a name ('name'), logging in with a passphrase ('login'), and showing a
 // new passphrase ('show', after signing up, or with player given). 'returning' greets someone whose
 // browser knew them only by name (from before passphrases) when that name already has a
-// passphrase: they log in with it, or start fresh. onSignUp and onLogin resolve with the player.
-export default function AccountPrompt({ mode: start, name, player, onSignUp, onLogin, onDone, onCancel }) {
+// passphrase: they log in with it, or start fresh. 'email' logs in with an email and password.
+// onSignUp, onLogin and onLoginEmail resolve with the player.
+export default function AccountPrompt({ mode: start, name, player, onSignUp, onLogin, onLoginEmail, onDone, onCancel }) {
   const [mode, setMode] = useState(start)
   const [value, setValue] = useState('')
   const [busy, setBusy] = useState(false)
@@ -134,6 +192,21 @@ export default function AccountPrompt({ mode: start, name, player, onSignUp, onL
     )
   }
 
+  if (mode === 'email') {
+    return (
+      <div className="modal-bg" onPointerDown={(e) => e.target === e.currentTarget && onCancel()}>
+        <div className="modal">
+          <h1>Log in</h1>
+          <p className="modal-text">Enter the email and password you switched your account to.</p>
+          <EmailForm action="Log in" onSubmit={async (email, password) => onDone(await onLoginEmail(email, password))} />
+          <button type="button" className="link" onClick={() => switchTo('login')}>
+            Log in with a passphrase instead
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="modal-bg" onPointerDown={(e) => e.target === e.currentTarget && onCancel()}>
       <form className="modal" onSubmit={submit}>
@@ -177,9 +250,16 @@ export default function AccountPrompt({ mode: start, name, player, onSignUp, onL
             Not you, or no other device? Start fresh as a new {name}
           </button>
         ) : (
-          <button type="button" className="link" onClick={() => switchTo(login ? 'name' : 'login')}>
-            {login ? 'New here? Pick a name instead' : 'Played before? Log in with your passphrase'}
-          </button>
+          <div className="links">
+            {login && (
+              <button type="button" className="link" onClick={() => switchTo('email')}>
+                Log in with email and password
+              </button>
+            )}
+            <button type="button" className="link" onClick={() => switchTo(login ? 'name' : 'login')}>
+              {login ? 'New here? Pick a name instead' : 'Played before? Log in'}
+            </button>
+          </div>
         )}
       </form>
     </div>

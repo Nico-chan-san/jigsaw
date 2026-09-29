@@ -4,7 +4,7 @@ import qrcode from 'qrcode-generator'
 import { api } from '../lib/api.js'
 import { useApp } from '../App.jsx'
 import { useLinger } from '../lib/linger.js'
-import { looksLikePassphrase, Passphrase, PassphraseWarning } from './Account.jsx'
+import { EmailForm, looksLikePassphrase, Passphrase, PassphraseWarning } from './Account.jsx'
 import { Close, Key, User } from './icons.jsx'
 
 const LOCAL = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
@@ -82,7 +82,7 @@ function PhoneLink({ player }) {
 
   return (
     <>
-      <p className="modal-text">Scan the code with your phone's camera to open this jigsaw there.</p>
+      <p className="modal-text">Scan to open this jigsaw on your phone.</p>
       <div className="qr-wrap">{link ? <QrCode text={link} /> : <span className="spin" />}</div>
       {noLan && <p className="modal-error">This computer isn't on a network, so a phone may not be able to reach it.</p>}
       {player && (
@@ -95,7 +95,7 @@ function PhoneLink({ player }) {
         >
           <span className="toggle-text">
             <span>Log in as {player.name}</span>
-            <span className="toggle-hint">The code carries your passphrase, so only show it to your own phone.</span>
+            <span className="toggle-hint">Contains your login. Only scan with your own phone.</span>
           </span>
           <span className="toggle-track" aria-hidden="true">
             <span className="toggle-knob" />
@@ -129,8 +129,9 @@ export function AccountButton() {
 
 // Everything about who you are: name, passphrase, and a QR code to carry on on your phone.
 export default function AccountDialog({ onClose, closing }) {
-  const { player, requireName, openLogin } = useApp()
+  const { player, requireName, openLogin, switchToEmail } = useApp()
   const [shown, setShown] = useState(false)
+  const [switching, setSwitching] = useState(false)
 
   useEffect(() => {
     const key = (e) => e.key === 'Escape' && onClose()
@@ -155,20 +156,42 @@ export default function AccountDialog({ onClose, closing }) {
                 <h2 className="label">Name</h2>
                 <NameField />
               </section>
-              <section className="field">
-                <h2 className="label">Passphrase</h2>
-                {shown ? (
-                  <>
-                    <Passphrase value={player.passphrase} />
-                    <p className="modal-note">Your login. Use it to play as yourself on another device.</p>
-                  </>
-                ) : (
-                  <button className="secondary" onClick={() => setShown(true)}>
-                    <Key />
-                    Show passphrase
+              {player.email ? (
+                <section className="field">
+                  <h2 className="label">Login</h2>
+                  <p className="account-email">{player.email}</p>
+                  <p className="modal-note">You log in with this email and your password.</p>
+                </section>
+              ) : switching ? (
+                <section className="field">
+                  <h2 className="label">Email and password</h2>
+                  <p className="modal-note">
+                    Log in with these instead of your passphrase. Your passphrase stops working, on every device.
+                  </p>
+                  <EmailForm action="Switch to email" create onSubmit={switchToEmail} />
+                  <button type="button" className="link" onClick={() => setSwitching(false)}>
+                    Keep my passphrase
                   </button>
-                )}
-              </section>
+                </section>
+              ) : (
+                <section className="field">
+                  <h2 className="label">Passphrase</h2>
+                  {shown ? (
+                    <>
+                      <Passphrase value={player.passphrase} />
+                      <p className="modal-note">Your login. Use it to play as yourself on another device.</p>
+                    </>
+                  ) : (
+                    <button className="secondary" onClick={() => setShown(true)}>
+                      <Key />
+                      Show passphrase
+                    </button>
+                  )}
+                  <button type="button" className="link" onClick={() => setSwitching(true)}>
+                    Switch to email and password
+                  </button>
+                </section>
+              )}
             </>
           ) : (
             <section className="field">

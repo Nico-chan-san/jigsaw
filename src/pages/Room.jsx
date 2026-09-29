@@ -99,7 +99,7 @@ function takeLocalRefs(id) {
 }
 
 export default function Room({ id }) {
-  const { name, playerId, theme, ensureName, requireName, setDialog } = useApp()
+  const { name, player, playerId, theme, ensureName, requireName, setDialog } = useApp()
   const me = useRef(playerId)
   me.current = playerId
   const sockRef = useRef(null)
@@ -199,7 +199,7 @@ export default function Room({ id }) {
         setDone(eng.isComplete())
         // Already finished before this player opened it: nothing left to celebrate.
         if (eng.isComplete()) store.set(`celebrated:${id}`, '1')
-        setData({ notes: room.notes || [], times: room.times || [] })
+        setData({ notes: room.notes || [], times: room.times || [], private: !!room.private, owner: room.owner })
         setEngine(eng)
         sock = sockRef.current = api.socket(id, {
           player: () => me.current,
@@ -258,6 +258,10 @@ export default function Room({ id }) {
   useEffect(() => {
     if (engine) sockRef.current?.send({ type: 'hello', player: playerId })
   }, [engine, playerId])
+  // Opening a private jigsaw's link (or logging in while here) adds it to this player's list.
+  useEffect(() => {
+    if (data?.private && player?.passphrase) api.join(id, player.passphrase).catch(() => {})
+  }, [id, data?.private, player?.passphrase])
 
   useEffect(() => {
     engine?.setColors(readColors())
@@ -404,7 +408,7 @@ export default function Room({ id }) {
           <KeyHint k="H" />
         </button>
         <AccountButton />
-        <Settings />
+        <Settings privateRoom={!!data?.private} />
       </div>
       {helpShown && <Help onClose={closeHelp} closing={helpClosing} />}
       {party && <Celebration onDone={endParty} />}
@@ -449,7 +453,7 @@ export default function Room({ id }) {
       {engine && (
         <Sidebar engine={engine} roomId={id} groups={groups} notes={notes} refs={refs} open={side} ready={ready} nameOf={nameOf} />
       )}
-      {engine && <Players open={players} stats={stats} times={times} notes={notes} me={playerId} nameOf={nameOf} />}
+      {engine && <Players open={players} stats={stats} times={times} notes={notes} me={playerId} owner={data?.owner} nameOf={nameOf} />}
     </div>
   )
 }

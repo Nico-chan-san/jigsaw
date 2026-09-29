@@ -317,20 +317,6 @@ button {
   height: 100%;
   background: var(--fg);
 }
-.card.new {
-  display: grid;
-  place-items: center;
-  min-height: 200px;
-  border-style: dashed;
-  color: var(--muted);
-}
-.card.new:hover {
-  color: var(--fg);
-}
-.card.new svg {
-  width: 28px;
-  height: 28px;
-}
 .card .del {
   position: absolute;
   top: 8px;
@@ -893,9 +879,6 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   .grid {
     grid-template-columns: 1fr 1fr;
     gap: 10px;
-  }
-  .card.new {
-    min-height: 140px;
   }
   .side {
     width: 150px;
@@ -1789,4 +1772,193 @@ button.link:hover {
 .room canvas,
 .room img {
   -webkit-user-drag: none;
+}
+
+/* ---- private rooms ---- */
+
+/* The tabs and the New jigsaw button above the jigsaw list. */
+.rooms-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.new-btn {
+  height: 38px;
+  padding: 0 14px 0 10px;
+  font-size: 14px;
+}
+.new-btn svg {
+  width: 18px;
+  height: 18px;
+}
+.tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.tab {
+  height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+}
+.tab:hover {
+  color: var(--fg);
+}
+.tab.on {
+  background: var(--hover);
+  color: var(--fg);
+}
+.private-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--panel);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.private-badge svg {
+  width: 15px;
+  height: 15px;
+}
+.modal h1.private-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.private-title svg {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+.room-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.room-link .text {
+  flex: 1;
+  min-width: 0;
+  font: 13px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.room-link .copy-btn {
+  flex: none;
+}
+
+/* ---- email login ---- */
+
+.email-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.email-form .modal-error {
+  margin: 0;
+}
+.links {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.account-email {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The jigsaw's creator in the players panel. */
+.pcreator {
+  display: inline-flex;
+  margin: -2px 5px 0 0;
+  vertical-align: middle;
+  color: #e5a50a;
+}
+.pcreator svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ---- invites ---- */
+
+.invite {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.invite-list {
+  max-height: 220px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  list-style: none;
+  scrollbar-width: thin;
+}
+.invite-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 36px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.invite-row:hover:not(:disabled) {
+  background: var(--hover);
+}
+.invite-row:disabled {
+  cursor: default;
+  color: var(--muted);
+}
+.invite-box {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+}
+.invite-row.on .invite-box {
+  border-color: var(--fg);
+  background: var(--fg);
+  color: var(--bg);
+}
+.invite-row:disabled .invite-box {
+  opacity: 0.5;
+}
+.invite-box svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.2;
+}
+.invite-name {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.invite-note {
+  flex: none;
+  font-size: 12px;
+}
+.modal.private-room {
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
 }

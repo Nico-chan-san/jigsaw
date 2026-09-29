@@ -4,10 +4,11 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
 import { networkInterfaces } from 'node:os'
 import { attachWebSocket } from './ws.js'
 import { WORDS } from './words.js'
+import { createMailer } from './mail.js'
 
 function openDb(file) {
   mkdirSync(dirname(file), { recursive: true })
@@ -113,6 +114,22 @@ function readJson(req, limit = 40 * 1024 * 1024) {
 const normalize = (s) => String(s || '').toLowerCase().split(/[^a-z]+/).filter(Boolean).join(' ')
 const hashSecret = (s) => createHash('sha256').update(normalize(s)).digest('hex')
 const cleanName = (s) => String(s || '').trim().slice(0, 32)
+const cleanEmail = (s) => String(s || '').trim().toLowerCase().slice(0, 254)
+const validEmail = (s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)
+const MIN_PASSWORD = 8
+
+// Passwords are stored as "salt:hash", both hex, hashed with scrypt.
+function hashPassword(password) {
+  const salt = randomBytes(16)
+  return `${salt.toString('hex')}:${scryptSync(String(password), salt, 32).toString('hex')}`
+}
+function checkPassword(password, stored) {
+  const [salt, hash] = String(stored || '').split(':')
+  if (!salt || !hash) return false
+  const got = scryptSync(String(password), Buffer.from(salt, 'hex'), 32)
+  const want = Buffer.from(hash, 'hex')
+  return want.length === got.length && timingSafeEqual(got, want)
+}
 
 // The machine's first network address, so a phone on the same network can open the app.
 function lanAddress() {
@@ -120,6 +137,12 @@ function lanAddress() {
     for (const a of list || []) if (a.family === 'IPv4' && !a.internal) return a.address
   }
   return null
+}
+
+// Where links in emails point: APP_URL when set, otherwise the address the browser used.
+function siteOrigin(req) {
+  if (process.env.APP_URL) return process.env.APP_URL.replace(/\/+$/, '')
+  return req.headers.origin || `http://${req.headers.host}`
 }
 
 function send(res, status, body) {
@@ -130,23 +153,25 @@ function send(res, status, body) {
 
 function createApi(dbFile) {
   const db = openDb(dbFile)
+  const mailer = createMailer()
   const sockets = new Map() // roomId -> Set<ws>
 
   const q = {
     list: db.prepare(`
-      SELECT r.id, r.name, r.created, r.cols, r.rows, r.shape, r.thumb, r.owner,
+      SELECT r.id, r.name, r.created, r.cols, r.rows, r.shape, r.thumb, r.owner, r.private,
              COUNT(p.idx) AS n, COUNT(DISTINCT p.g) AS groups,
              (SELECT COALESCE(SUM(t.seconds), 0) FROM times t WHERE t.room_id = r.id) AS seconds
       FROM rooms r LEFT JOIN pieces p ON p.room_id = r.id
+      WHERE r.private = 0 OR r.id IN (SELECT room_id FROM room_players WHERE player_id = ?)
       GROUP BY r.id ORDER BY r.created DESC`),
     room: db.prepare(
-      'SELECT id, name, created, cols, rows, shape, seed, width, height, annoying, owner FROM rooms WHERE id = ?',
+      'SELECT id, name, created, cols, rows, shape, seed, width, height, annoying, owner, private FROM rooms WHERE id = ?',
     ),
     image: db.prepare('SELECT image, image_type FROM rooms WHERE id = ?'),
     pieces: db.prepare('SELECT idx AS i, x, y, r, g, by, f FROM pieces WHERE room_id = ? ORDER BY idx'),
     insertRoom: db.prepare(`
-      INSERT INTO rooms (id, name, created, cols, rows, shape, seed, width, height, image, image_type, thumb, annoying, owner)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+      INSERT INTO rooms (id, name, created, cols, rows, shape, seed, width, height, image, image_type, thumb, annoying, owner, private)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     insertPiece: db.prepare(
       'INSERT INTO pieces (room_id, idx, x, y, r, g, by, f) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     ),
@@ -155,6 +180,14 @@ function createApi(dbFile) {
     ),
     deleteRoom: db.prepare('DELETE FROM rooms WHERE id = ?'),
     deletePieces: db.prepare('DELETE FROM pieces WHERE room_id = ?'),
+    join: db.prepare('INSERT OR IGNORE INTO room_players (room_id, player_id, joined) VALUES (?, ?, ?)'),
+    deleteMembers: db.prepare('DELETE FROM room_players WHERE room_id = ?'),
+    member: db.prepare('SELECT 1 FROM room_players WHERE room_id = ? AND player_id = ?'),
+    // Players who can be invited by email (never the address itself), and whether they already have the room.
+    invitable: db.prepare(`
+      SELECT p.id, p.name, EXISTS (SELECT 1 FROM room_players m WHERE m.room_id = ?1 AND m.player_id = p.id) AS joined
+      FROM players p WHERE p.email IS NOT NULL AND p.id != ?2 ORDER BY p.name COLLATE NOCASE`),
+    emailOf: db.prepare('SELECT id, email FROM players WHERE id = ? AND email IS NOT NULL'),
     notes: db.prepare('SELECT id, x, y, text, author, created FROM notes WHERE room_id = ? ORDER BY created'),
     upsertNote: db.prepare(`
       INSERT INTO notes (id, room_id, x, y, text, author, created) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -176,13 +209,21 @@ function createApi(dbFile) {
     deleteRef: db.prepare('DELETE FROM refs WHERE room_id = ? AND id = ?'),
     deleteRefs: db.prepare('DELETE FROM refs WHERE room_id = ?'),
     player: db.prepare('SELECT id, name FROM players WHERE id = ?'),
-    playerBySecret: db.prepare('SELECT id, name FROM players WHERE secret = ?'),
-    unclaimed: db.prepare('SELECT id, name FROM players WHERE name = ? AND secret IS NULL ORDER BY created LIMIT 1'),
+    // A passphrase, or the token of a device logged in with an email and password.
+    playerBySecret: db.prepare(`
+      SELECT id, name, email FROM players WHERE secret = ?1
+      UNION SELECT p.id, p.name, p.email FROM sessions s JOIN players p ON p.id = s.player_id WHERE s.token = ?1`),
+    playerByEmail: db.prepare('SELECT id, name, email, password FROM players WHERE email = ?'),
+    unclaimed: db.prepare(
+      'SELECT id, name FROM players WHERE name = ? AND secret IS NULL AND email IS NULL ORDER BY created LIMIT 1',
+    ),
     secretTaken: db.prepare('SELECT 1 FROM players WHERE secret = ?'),
     named: db.prepare('SELECT 1 FROM players WHERE name = ? LIMIT 1'),
     insertPlayer: db.prepare('INSERT INTO players (id, name, secret, created) VALUES (?, ?, ?, ?)'),
     setSecret: db.prepare('UPDATE players SET secret = ? WHERE id = ?'),
-    renamePlayer: db.prepare('UPDATE players SET name = ? WHERE secret = ? RETURNING id, name'),
+    renamePlayer: db.prepare('UPDATE players SET name = ? WHERE id = ? RETURNING id, name'),
+    useEmail: db.prepare('UPDATE players SET email = ?, password = ?, secret = NULL WHERE id = ?'),
+    insertSession: db.prepare('INSERT INTO sessions (token, player_id, created) VALUES (?, ?, ?)'),
     // Everyone who has left a mark on a room, so their names can be shown.
     roomPlayers: db.prepare(`
       SELECT id, name FROM players WHERE id IN (
@@ -199,6 +240,33 @@ function createApi(dbFile) {
       const words = Array.from({ length: 4 }, () => WORDS[randomInt(WORDS.length)]).join(' ')
       if (!q.secretTaken.get(hashSecret(words))) return words
     }
+  }
+
+  // A new login token for a player with an email. Only letters, so it survives normalize() like a
+  // passphrase does, and the browser keeps it in place of one.
+  function newSession(playerId) {
+    const token = Array.from(randomBytes(32), (b) => String.fromCharCode(97 + (b % 26))).join('')
+    q.insertSession.run(hashSecret(token), playerId, Date.now())
+    return token
+  }
+
+  // Emails a private jigsaw's link to players with an email, and adds it to their list. Players who
+  // already have it are skipped, so nobody gets the same invite twice. Returns how many were invited.
+  function invite(room, from, ids, origin) {
+    const link = `${origin}/r/${room.id}`
+    let n = 0
+    for (const id of new Set((Array.isArray(ids) ? ids : []).slice(0, 50).map(String))) {
+      const p = q.emailOf.get(id)
+      if (!p || p.id === from.id || q.member.get(room.id, p.id)) continue
+      q.join.run(room.id, p.id, Date.now())
+      mailer.send({
+        to: p.email,
+        subject: `${from.name} invited you to a jigsaw`,
+        text: `${from.name} invited you to play "${room.name}", a private jigsaw.\n\nOpen it here: ${link}\n\nOnly people with this link can see and play it.`,
+      })
+      n++
+    }
+    return n
   }
 
   function createPlayer(name) {
@@ -364,6 +432,15 @@ function createApi(dbFile) {
       // /api/lan: where phones on the same network can reach this server.
       if (parts[0] === 'lan' && req.method === 'GET') return send(res, 200, { address: lanAddress() })
 
+      // /api/players/invitable: players who can get an email invite, for a logged in player.
+      // With ?room=, each says whether they already have that jigsaw.
+      if (parts[0] === 'players' && parts[1] === 'invitable' && req.method === 'GET') {
+        const who = req.headers['x-passphrase'] ? q.playerBySecret.get(hashSecret(req.headers['x-passphrase'])) : null
+        if (!who) return send(res, 403, { error: 'log in to invite players' })
+        const list = q.invitable.all(url.searchParams.get('room') || '', who.id)
+        return send(res, 200, list.map((p) => ({ ...p, joined: !!p.joined })))
+      }
+
       // /api/players: sign up with a name, log in with a passphrase, rename.
       if (parts[0] === 'players' && req.method === 'POST') {
         const b = await readJson(req, 64 * 1024)
@@ -397,11 +474,42 @@ function createApi(dbFile) {
           }
           return send(res, 200, { ...p, passphrase: normalize(b.passphrase) })
         }
+        // Log in with an email and password: this device gets its own token to use as its passphrase.
+        if (parts[1] === 'email-login') {
+          const ip = req.socket.remoteAddress || ''
+          if (blocked(ip)) return send(res, 429, { error: 'too many tries, wait a few minutes' })
+          const p = q.playerByEmail.get(cleanEmail(b.email))
+          if (!p || !checkPassword(b.password, p.password)) {
+            failed(ip)
+            return send(res, 404, { error: 'wrong email or password' })
+          }
+          return send(res, 200, { id: p.id, name: p.name, email: p.email, passphrase: newSession(p.id) })
+        }
+        // Switch from a passphrase to an email and password. The passphrase stops working, on every
+        // device, and this one carries on with a new token.
+        if (parts[1] === 'email') {
+          const who = normalize(b.passphrase) && q.playerBySecret.get(hashSecret(b.passphrase))
+          if (!who) return send(res, 404, { error: 'unknown passphrase' })
+          if (who.email) return send(res, 400, { error: 'already using an email' })
+          const email = cleanEmail(b.email)
+          if (!validEmail(email)) return send(res, 400, { error: 'enter a valid email' })
+          if (String(b.password || '').length < MIN_PASSWORD) {
+            return send(res, 400, { error: `use at least ${MIN_PASSWORD} characters for the password` })
+          }
+          if (q.playerByEmail.get(email)) return send(res, 409, { error: 'that email is already in use' })
+          let passphrase
+          tx(() => {
+            q.useEmail.run(email, hashPassword(b.password), who.id)
+            passphrase = newSession(who.id)
+          })
+          return send(res, 200, { id: who.id, name: who.name, email, passphrase })
+        }
         if (parts[1] === 'rename') {
           const name = cleanName(b.name)
           if (!name) return send(res, 400, { error: 'name required' })
-          const p = q.renamePlayer.get(name, hashSecret(b.passphrase))
-          if (!p) return send(res, 404, { error: 'unknown passphrase' })
+          const who = normalize(b.passphrase) && q.playerBySecret.get(hashSecret(b.passphrase))
+          if (!who) return send(res, 404, { error: 'unknown passphrase' })
+          const p = q.renamePlayer.get(name, who.id)
           for (const [roomId, set] of sockets) {
             for (const ws of set) if (ws.player?.id === p.id) ws.player = p
             broadcast(roomId, { type: 'player', player: p })
@@ -416,7 +524,10 @@ function createApi(dbFile) {
 
       if (parts.length === 1) {
         if (req.method === 'GET') {
-          const rows = q.list.all().map((r) => ({
+          // Private jigsaws are listed only for players who have opened them. Player ids are seen by
+          // everyone, so the list is asked for with the passphrase.
+          const who = req.headers['x-passphrase'] ? q.playerBySecret.get(hashSecret(req.headers['x-passphrase'])) : null
+          const rows = q.list.all(who?.id || '').map((r) => ({
             ...r,
             progress: r.n > 1 ? (r.n - r.groups) / (r.n - 1) : 0,
             done: r.n > 0 && r.groups === 1,
@@ -432,7 +543,9 @@ function createApi(dbFile) {
           // The creator proves who they are with their passphrase, and becomes the owner.
           const owner = b.passphrase ? q.playerBySecret.get(hashSecret(b.passphrase)) : null
           if (!owner) return send(res, 403, { error: 'log in to create a jigsaw' })
-          const id = randomUUID().slice(0, 8)
+          // A private jigsaw's link is all it takes to join, so it gets an id too long to guess.
+          const hidden = !!b.private
+          const id = hidden ? randomBytes(12).toString('base64url') : randomUUID().slice(0, 8)
           tx(() => {
             q.insertRoom.run(
               id,
@@ -449,9 +562,12 @@ function createApi(dbFile) {
               String(b.thumb || ''),
               b.annoying ? 1 : 0,
               owner.id,
+              hidden ? 1 : 0,
             )
+            if (hidden) q.join.run(id, owner.id, Date.now())
             for (const p of b.pieces) q.insertPiece.run(id, p.i, p.x, p.y, p.r, p.g, null, p.f ? 1 : 0)
           })
+          if (hidden) invite(q.room.get(id), owner, b.invite, siteOrigin(req))
           return send(res, 200, { id })
         }
       }
@@ -485,6 +601,7 @@ function createApi(dbFile) {
             q.deleteNotes.run(id)
             q.deleteRefs.run(id)
             q.deleteTimes.run(id)
+            q.deleteMembers.run(id)
             q.deleteRoom.run(id)
           })
           broadcast(id, { type: 'deleted' })
@@ -497,6 +614,23 @@ function createApi(dbFile) {
         res.setHeader('Content-Type', img.image_type)
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
         return res.end(Buffer.from(img.image))
+      }
+
+      // A player opened a private jigsaw's link: from now on it shows in their list.
+      if (parts[2] === 'join' && req.method === 'POST') {
+        const b = await readJson(req, 64 * 1024)
+        const who = b.passphrase ? q.playerBySecret.get(hashSecret(b.passphrase)) : null
+        if (room.private && who) q.join.run(id, who.id, Date.now())
+        return send(res, 200, { ok: true })
+      }
+
+      // Anyone logged in with a private jigsaw's link may invite others to it.
+      if (parts[2] === 'invite' && req.method === 'POST') {
+        const b = await readJson(req, 64 * 1024)
+        const who = b.passphrase ? q.playerBySecret.get(hashSecret(b.passphrase)) : null
+        if (!who) return send(res, 403, { error: 'log in to invite players' })
+        if (!room.private) return send(res, 400, { error: 'only private jigsaws take invites' })
+        return send(res, 200, { invited: invite(room, who, b.players, siteOrigin(req)) })
       }
 
       if (parts[2] === 'time' && req.method === 'POST') {

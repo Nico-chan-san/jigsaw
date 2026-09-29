@@ -215,7 +215,11 @@ export class Engine {
         this.pointerAt = null
         this.send({ type: 'cursor', hide: true })
       },
-      menu: (e) => e.preventDefault(),
+      // No context menu on the table, nor anywhere while something is being dragged (a right or
+      // shift + right click mid drag lands on whatever is under the pointer, not always the table).
+      menu: (e) => {
+        if (e.target === c || this.drag || this.pan || this.marquee || this.refDrag) e.preventDefault()
+      },
       // The browser's own drag and drop (of a page selection, say) never starts from the table.
       nodrag: (e) => e.preventDefault(),
     }
@@ -225,7 +229,7 @@ export class Engine {
     c.addEventListener('pointercancel', this.h.up)
     c.addEventListener('pointerleave', this.h.leave)
     c.addEventListener('wheel', this.h.wheel, { passive: false })
-    c.addEventListener('contextmenu', this.h.menu)
+    window.addEventListener('contextmenu', this.h.menu, true)
     this.host = c.parentElement
     this.host?.addEventListener('dragstart', this.h.nodrag)
     window.addEventListener('keydown', this.h.key)
@@ -246,7 +250,7 @@ export class Engine {
     c.removeEventListener('pointercancel', this.h.up)
     c.removeEventListener('pointerleave', this.h.leave)
     c.removeEventListener('wheel', this.h.wheel)
-    c.removeEventListener('contextmenu', this.h.menu)
+    window.removeEventListener('contextmenu', this.h.menu, true)
     this.host?.removeEventListener('dragstart', this.h.nodrag)
     window.removeEventListener('keydown', this.h.key)
     window.removeEventListener('keyup', this.h.keyup)

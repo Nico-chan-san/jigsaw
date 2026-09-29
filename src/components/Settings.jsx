@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from '../App.jsx'
-import { External, Gear, GitHub, Logout, Moon, User } from './icons.jsx'
+import { External, Gear, GitHub, Lock, Logout, Moon, User } from './icons.jsx'
 import AccountDialog from './AccountDialog.jsx'
 import { useLinger } from '../lib/linger.js'
 import { Passphrase } from './Account.jsx'
 import Confirm from './Confirm.jsx'
+import PrivateRoom from './PrivateRoom.jsx'
 
 // Header button that toggles a small settings panel: account, dark mode, source link and log out.
-export default function Settings() {
-  const { theme, toggleTheme, player, logout } = useApp()
+// In a private jigsaw it also has a button that shows its link.
+export default function Settings({ privateRoom = false }) {
+  const { theme, toggleTheme, player, logout, roomId } = useApp()
+  const [sharing, setSharing] = useState(false)
+  const closeSharing = useCallback(() => setSharing(false), [])
   const [open, setOpen] = useState(false)
   const [account, setAccount] = useState(false)
   const closeAccount = useCallback(() => setAccount(false), [])
@@ -56,6 +60,19 @@ export default function Settings() {
             <User />
             <span>Account</span>
           </button>
+          {privateRoom && (
+            <button
+              className="settings-row"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false)
+                setSharing(true)
+              }}
+            >
+              <Lock />
+              <span>Private room</span>
+            </button>
+          )}
           <button className="settings-row" role="menuitemcheckbox" aria-checked={dark} onClick={toggleTheme}>
             <Moon />
             <span>Dark mode</span>
@@ -88,11 +105,16 @@ export default function Settings() {
           )}
         </div>
       )}
+      {sharing && roomId && <PrivateRoom id={roomId} onClose={closeSharing} />}
       {accountShown && <AccountDialog onClose={closeAccount} closing={accountClosing} />}
       {leaving && player && (
         <Confirm
           title={`Log out ${player.name}?`}
-          text="You can log back in with your passphrase:"
+          text={
+            player.email
+              ? `You can log back in with ${player.email} and your password.`
+              : 'You can log back in with your passphrase:'
+          }
           action="Log out"
           danger
           onCancel={stay}
@@ -101,7 +123,7 @@ export default function Settings() {
             setLeaving(false)
           }}
         >
-          <Passphrase value={player.passphrase} />
+          {!player.email && <Passphrase value={player.passphrase} />}
         </Confirm>
       )}
     </span>

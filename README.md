@@ -38,3 +38,13 @@ To use a different port, pass it after `--`, for example `npm run dev -- --port 
 - The SQLite database lives at `data/puzzle.db` and is created automatically on first start. The `data/` directory is git ignored.
 - The API is served under `/api`, with the WebSocket endpoint at `/api/ws`.
 - Schema migrations in `server/migrations/` run automatically, in order, each time the server starts. See `AGENTS.md` for the rules on adding migrations.
+
+## Email
+
+Players can switch their login to an email and password, and invite players who have an email to private jigsaws. Invites are sent over SMTP, set up with environment variables:
+
+- `SMTP_URL`, such as `smtps://user:pass@smtp.example.com`, or `SMTP_HOST`, `SMTP_PORT` (default 587, 465 uses TLS), `SMTP_USER` and `SMTP_PASS`
+- `MAIL_FROM`, the sender, such as `Jigsaw <jigsaw@example.com>`
+- `APP_URL`, the public address used for links in emails, such as `https://jigsaw.example.com`. Without it, links use the address the inviting browser was on.
+
+Without SMTP settings, emails are printed to the server log instead of being sent.

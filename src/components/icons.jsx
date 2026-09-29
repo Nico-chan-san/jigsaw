@@ -186,6 +186,19 @@ export const Key = (p) => (
   </Svg>
 )
 
+export const Crown = (p) => (
+  <Svg {...p}>
+    <path d="M4.5 17.5 3 8l5 3.5L12 5l4 6.5L21 8l-1.5 9.5z" />
+  </Svg>
+)
+
+export const Lock = (p) => (
+  <Svg {...p}>
+    <rect x="5" y="10.5" width="14" height="9.5" rx="2" />
+    <path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" />
+  </Svg>
+)
+
 export const Logout = (p) => (
   <Svg {...p}>
     <path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M9 16l-4-4 4-4M5 12h10" />

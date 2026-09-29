@@ -3,6 +3,7 @@ import { api } from '../lib/api.js'
 import { SHAPES, buildPuzzle, gridFor, outlinePath, pile, samplePiecePath, scatter } from '../lib/geometry.js'
 import { useApp } from '../App.jsx'
 import { Arrow, Upload } from '../components/icons.jsx'
+import InviteList from '../components/Invite.jsx'
 
 const MIN = 4
 const MAX = 4000
@@ -94,6 +95,9 @@ export default function NewRoom() {
   const [typed, setTyped] = useState(null)
   const [shape, setShape] = useState('classic')
   const [annoying, setAnnoying] = useState(false)
+  const [hidden, setHidden] = useState(false)
+  // Players to email the private jigsaw's link to, by id.
+  const [invited, setInvited] = useState(() => new Set())
   const [over, setOver] = useState(false)
   const [busy, setBusy] = useState(false)
   const [link, setLink] = useState('')
@@ -176,6 +180,8 @@ export default function NewRoom() {
         image: full.data,
         thumb: thumb.data,
         annoying,
+        private: hidden,
+        invite: hidden ? [...invited] : [],
         pieces: annoying ? pile(room) : scatter(room),
         passphrase: currentPlayer()?.passphrase,
       })
@@ -327,6 +333,32 @@ export default function NewRoom() {
             </span>
           </button>
         </section>
+
+        <section className="field">
+          <h2 className="label">Visibility</h2>
+          <button
+            className={`toggle${hidden ? ' on' : ''}`}
+            role="switch"
+            aria-checked={hidden}
+            onClick={() => setHidden((v) => !v)}
+            title="Private room"
+          >
+            <span className="toggle-text">
+              <span>Private room</span>
+              <span className="toggle-hint">Only people with the link can see and play this jigsaw.</span>
+            </span>
+            <span className="toggle-track" aria-hidden="true">
+              <span className="toggle-knob" />
+            </span>
+          </button>
+        </section>
+
+        {hidden && (
+          <section className="field">
+            <h2 className="label">Invite players</h2>
+            <InviteList selected={invited} onChange={setInvited} />
+          </section>
+        )}
 
         <button
           className="primary wide"

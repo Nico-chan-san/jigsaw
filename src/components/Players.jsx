@@ -1,5 +1,5 @@
 import { formatTime } from '../lib/time.js'
-import { Clock, Note, Piece } from './icons.jsx'
+import { Clock, Crown, Note, Piece } from './icons.jsx'
 
 // Everyone who has done something in this jigsaw, most pieces connected first, then most time.
 // Players are kept apart by id, since two of them can share a name.
@@ -21,7 +21,8 @@ export function rankPlayers({ stats, times, notes, nameOf }) {
   )
 }
 
-export default function Players({ open, stats, times, notes, me, nameOf }) {
+// owner is the id of the player who made the jigsaw, marked with a crown.
+export default function Players({ open, stats, times, notes, me, owner, nameOf }) {
   const list = rankPlayers({ stats, times, notes, nameOf })
 
   return (
@@ -30,7 +31,12 @@ export default function Players({ open, stats, times, notes, me, nameOf }) {
       <ol>
         {list.map((p) => (
           <li key={p.id} className={p.id === me ? 'me' : ''}>
-            <span className="pname" title={p.name}>
+            <span className="pname" title={p.id === owner ? `${p.name}, made this jigsaw` : p.name}>
+              {p.id === owner && (
+                <span className="pcreator" title={`${p.name} created this room`}>
+                  <Crown />
+                </span>
+              )}
               {p.name}
             </span>
             <span className="pstats">

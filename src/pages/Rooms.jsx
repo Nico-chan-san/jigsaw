@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api.js'
 import { navigate, store, useApp } from '../App.jsx'
-import { Check, Clock, Plus, Trash } from '../components/icons.jsx'
+import { Check, Clock, Lock, Plus, Trash } from '../components/icons.jsx'
 import Sheet from '../components/Sheet.jsx'
 import NewRoom from './NewRoom.jsx'
 import Confirm from '../components/Confirm.jsx'
@@ -22,6 +22,11 @@ function Card({ r, mine, onOpen, onDelete }) {
     >
       <div className="thumb-wrap">
         <img className="thumb" src={r.thumb} alt="" loading="lazy" />
+        {!!r.private && (
+          <span className="private-badge" title="Private room: only people with the link can see it">
+            <Lock />
+          </span>
+        )}
         {r.done && (
           <div className="done-overlay" title="Complete">
             <span className="done-badge">
@@ -57,6 +62,12 @@ function Card({ r, mine, onOpen, onDelete }) {
   )
 }
 
+const TABS = [
+  { key: 'all', title: 'All', test: () => true },
+  { key: 'public', title: 'Public', test: (r) => !r.private },
+  { key: 'private', title: 'Private', test: (r) => !!r.private },
+]
+
 const SECTIONS = [
   { title: 'In progress', test: (r) => !r.done },
   { title: 'Finished', test: (r) => r.done },
@@ -67,11 +78,23 @@ const SECTIONS = [
 export default function RoomsDialog({ view, setView, closing, onClose }) {
   const { roomId, openRoom, player, playerId, openLogin } = useApp()
   const [rooms, setRooms] = useState(null)
+  const [tab, setTabState] = useState(() =>
+    TABS.some((t) => t.key === store.get('roomsTab')) ? store.get('roomsTab') : 'all',
+  )
+  const setTab = (key) => {
+    store.set('roomsTab', key)
+    setTabState(key)
+  }
+  const shown = TABS.find((t) => t.key === tab).test
 
-  const load = () => api.rooms().then(setRooms).catch(() => setRooms([]))
+  const load = () =>
+    api
+      .rooms(player?.passphrase)
+      .then(setRooms)
+      .catch(() => setRooms([]))
   useEffect(() => {
     load()
-  }, [])
+  }, [player?.passphrase])
 
   // The jigsaw waiting for a yes in the delete dialog.
   const [doomed, setDoomed] = useState(null)
@@ -112,16 +135,28 @@ export default function RoomsDialog({ view, setView, closing, onClose }) {
         <NewRoom />
       ) : (
         <>
-          <section className="rooms-section">
-            <h2>New</h2>
-            <div className="grid">
-              <button className="card new" onClick={() => setView('new')} aria-label="New jigsaw" title="New jigsaw">
-                <Plus />
-              </button>
+          <div className="rooms-bar">
+            <div className="tabs" role="tablist" aria-label="Show jigsaws">
+              {TABS.map((t) => (
+                <button
+                  key={t.key}
+                  className={`tab${t.key === tab ? ' on' : ''}`}
+                  role="tab"
+                  aria-selected={t.key === tab}
+                  onClick={() => setTab(t.key)}
+                  title={`${t.title} jigsaws`}
+                >
+                  {t.title}
+                </button>
+              ))}
             </div>
-          </section>
+            <button className="primary new-btn" onClick={() => setView('new')} title="New jigsaw">
+              <Plus />
+              New jigsaw
+            </button>
+          </div>
           {SECTIONS.map(({ title, test }) => {
-            const list = rooms?.filter(test) || []
+            const list = rooms?.filter((r) => shown(r) && test(r)) || []
             if (!list.length) return null
             return (
               <section key={title} className="rooms-section">
