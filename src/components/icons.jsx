@@ -186,6 +186,12 @@ export const Key = (p) => (
   </Svg>
 )
 
+export const Chevron = (p) => (
+  <Svg {...p}>
+    <path d="m7 10 5 5 5-5" />
+  </Svg>
+)
+
 export const Crown = (p) => (
   <Svg {...p}>
     <path d="M4.5 17.5 3 8l5 3.5L12 5l4 6.5L21 8l-1.5 9.5z" />

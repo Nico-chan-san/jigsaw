@@ -334,10 +334,29 @@ button {
 .create {
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 20px;
   max-width: 600px;
   margin: 8px auto 0;
   padding-bottom: 48px;
+}
+.create-media,
+.create-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+.create-media {
+  gap: 8px;
+}
+.link-row .text,
+.link-row .secondary {
+  height: 38px;
+  font-size: 14px;
+}
+.link-row .secondary {
+  min-width: 0;
+  padding: 0 14px;
 }
 .field {
   display: flex;
@@ -427,7 +446,6 @@ button {
 }
 .primary:focus-visible,
 .secondary:focus-visible,
-.shape:focus-visible,
 .drop:focus-visible {
   outline: 0;
   box-shadow: 0 0 0 4px var(--ring);
@@ -608,37 +626,138 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   box-shadow: 0 0 0 1px var(--fg), 0 0 0 5px var(--ring);
 }
 
-.shapes {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 8px;
+.pieces-row {
+  align-items: flex-end;
+  gap: 10px;
 }
-.shape {
-  display: grid;
-  place-items: center;
-  aspect-ratio: 1;
-  padding: 0;
+.pieces-row > .field {
+  flex: none;
+  width: auto;
+}
+.pieces-row > .field.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.pieces-row input[type='range'] {
+  min-width: 0;
+}
+/* On a phone the shape button is just the outline, so the slider keeps its room. */
+@media (max-width: 480px) {
+  .shape-btn > span {
+    display: none;
+  }
+}
+
+/* The shape dropdown next to the pieces slider. */
+.shape-picker {
+  position: relative;
+}
+.shape-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 10px 0 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--field);
-  color: var(--muted);
-  transition: border-color 0.15s, background 0.15s, color 0.15s, box-shadow 0.15s;
+  color: var(--fg);
+  font: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-.shape:hover {
+.shape-btn:hover,
+.shape-btn.on {
   border-color: var(--line-strong);
-  color: var(--fg);
 }
-.shape.on {
-  border-color: var(--fg);
+.shape-btn:focus-visible,
+.shape-option:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 4px var(--ring);
+}
+.shape-btn svg,
+.shape-option svg {
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+.shape-btn svg.shape-chevron {
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+.shape-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 5;
+  min-width: 100%;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px var(--shadow);
+  list-style: none;
+  animation: pop 0.14s ease;
+}
+.shape-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 36px;
+  padding: 0 10px 0 8px;
+  border: 0;
+  border-radius: 7px;
   background: transparent;
-  color: var(--fg);
-  box-shadow: inset 0 0 0 1px var(--fg);
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  white-space: nowrap;
 }
-.shape svg {
-  width: 56%;
-  height: 56%;
-  max-width: 40px;
-  max-height: 40px;
+.shape-option:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+.shape-option.on {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+/* Hardcore and private as rows in one box. */
+.options {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--field);
+}
+.options .toggle {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.options .toggle + .toggle,
+.options > * + * {
+  border-top: 1px solid var(--line);
+}
+.options .toggle:hover {
+  background: var(--hover);
+}
+.options .toggle:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--ring);
+}
+.options-invite {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px 14px;
+}
+.options-invite .invite-list {
+  background: var(--bg);
 }
 
 .toggle {
@@ -698,12 +817,6 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 }
 .toggle.on .toggle-knob {
   transform: translateX(16px);
-}
-
-@media (max-width: 480px) {
-  .shapes {
-    grid-template-columns: repeat(3, 1fr);
-  }
 }
 
 /* ---- room ---- */
@@ -1584,21 +1697,6 @@ button.link:hover {
   height: 14px;
 }
 
-/* "or" between the image drop area and the link field, with a rule on each side. */
-.or {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: var(--muted);
-  font-size: 12px;
-}
-.or::before,
-.or::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--line);
-}
 
 .modal-actions {
   justify-content: flex-end;
@@ -1696,7 +1794,6 @@ button.link:hover {
   display: flex;
   align-items: flex-end;
   gap: 10px;
-  transform: rotate(-3deg);
   filter: drop-shadow(0 18px 30px rgba(0, 0, 0, 0.35));
   animation: sticker 0.55s cubic-bezier(0.3, 1.5, 0.5, 1);
 }
@@ -1706,7 +1803,7 @@ button.link:hover {
 @keyframes sticker {
   from {
     opacity: 0;
-    transform: rotate(-12deg) scale(0.4);
+    transform: scale(0.4);
   }
 }
 .stand {

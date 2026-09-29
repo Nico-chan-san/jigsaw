@@ -1684,12 +1684,20 @@ export class Engine {
     ]
   }
 
+  // Screen-space center of a selected image's delete button, inside its top right corner, clear of
+  // the resize handle there.
+  refDelAt(ref) {
+    const [, y0, x1] = this.refRect(ref)
+    return [x1 - DEL_R - 8, y0 + DEL_R + 8]
+  }
+
   // The selected image's handles win over everything; otherwise the topmost image under the point.
   refHit(sx, sy) {
     const sel = this.refs.find((r) => r.id === this.refSel)
     if (sel) {
       const [x0, y0, x1, y1] = this.refRect(sel)
-      if (Math.hypot(sx - x1, sy - (y0 - DEL_R - 6)) <= DEL_R + 2) return { ref: sel, mode: 'del' }
+      const [dx, dy] = this.refDelAt(sel)
+      if (Math.hypot(sx - dx, sy - dy) <= DEL_R + 2) return { ref: sel, mode: 'del' }
       for (const cx of [0, 1]) {
         for (const cy of [0, 1]) {
           const hx = cx ? x1 : x0
@@ -2135,12 +2143,15 @@ export class Engine {
         ctx.fillRect(hx - HANDLE / 2 - 1, hy - HANDLE / 2 - 1, HANDLE + 2, HANDLE + 2)
         ctx.strokeRect(hx - HANDLE / 2 - 1, hy - HANDLE / 2 - 1, HANDLE + 2, HANDLE + 2)
       }
-      const cx = x1
-      const cy = y0 - DEL_R - 6
+      const [cx, cy] = this.refDelAt(sel)
       ctx.beginPath()
       ctx.arc(cx, cy, DEL_R, 0, Math.PI * 2)
       ctx.fillStyle = this.colors.line || '#000'
       ctx.fill()
+      // A ring in the table color keeps it apart from an image of the same shade underneath.
+      ctx.lineWidth = 1.5
+      ctx.strokeStyle = this.colors.bg
+      ctx.stroke()
       const q = DEL_R * 0.38
       ctx.beginPath()
       ctx.moveTo(cx - q, cy - q)

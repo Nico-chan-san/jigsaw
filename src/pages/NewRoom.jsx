@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
 import { SHAPES, buildPuzzle, gridFor, outlinePath, pile, samplePiecePath, scatter } from '../lib/geometry.js'
 import { useApp } from '../App.jsx'
-import { Arrow, Upload } from '../components/icons.jsx'
+import { Arrow, Chevron, Upload } from '../components/icons.jsx'
 import InviteList from '../components/Invite.jsx'
 
 const MIN = 4
@@ -49,6 +49,70 @@ function ShapeIcon({ shape }) {
         strokeLinejoin="round"
       />
     </svg>
+  )
+}
+
+const shapeName = (s) => s[0].toUpperCase() + s.slice(1)
+
+// A dropdown of piece shapes, each shown with its outline.
+function ShapePicker({ value, onChange }) {
+  const [open, setOpen] = useState(false)
+  const wrap = useRef(null)
+
+  // Close on a press anywhere else, or Escape (which then leaves the window open).
+  useEffect(() => {
+    if (!open) return
+    const away = (e) => !wrap.current?.contains(e.target) && setOpen(false)
+    const key = (e) => {
+      if (e.key !== 'Escape') return
+      e.stopImmediatePropagation()
+      setOpen(false)
+    }
+    window.addEventListener('pointerdown', away, true)
+    window.addEventListener('keydown', key, true)
+    return () => {
+      window.removeEventListener('pointerdown', away, true)
+      window.removeEventListener('keydown', key, true)
+    }
+  }, [open])
+
+  return (
+    <div className="shape-picker" ref={wrap}>
+      <button
+        type="button"
+        className={`shape-btn${open ? ' on' : ''}`}
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        title={`Shape: ${shapeName(value)}`}
+      >
+        <ShapeIcon shape={value} />
+        <span>{shapeName(value)}</span>
+        <Chevron className="shape-chevron" />
+      </button>
+      {open && (
+        <ul className="shape-menu" role="listbox" aria-label="Shape">
+          {SHAPES.map((s) => (
+            <li key={s}>
+              <button
+                type="button"
+                className={`shape-option${s === value ? ' on' : ''}`}
+                role="option"
+                aria-selected={s === value}
+                autoFocus={s === value}
+                onClick={() => {
+                  onChange(s)
+                  setOpen(false)
+                }}
+              >
+                <ShapeIcon shape={s} />
+                <span>{shapeName(s)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
 
@@ -191,174 +255,142 @@ export default function NewRoom() {
     }
   }
 
+  // A switch row in the options box.
+  const option = (on, set, label, hint) => (
+    <button className={`toggle${on ? ' on' : ''}`} role="switch" aria-checked={on} onClick={() => set((v) => !v)} title={label}>
+      <span className="toggle-text">
+        <span>{label}</span>
+        <span className="toggle-hint">{hint}</span>
+      </span>
+      <span className="toggle-track" aria-hidden="true">
+        <span className="toggle-knob" />
+      </span>
+    </button>
+  )
+
   return (
     <section className="create">
-        <section className="field">
-          <h2 className="label">Title</h2>
-          <input
-            className="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Title"
-            maxLength={60}
-            aria-label="Title"
-            title="Title"
-          />
-        </section>
+      <section className="field">
+        <h2 className="label">Title</h2>
+        <input
+          className="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Title"
+          maxLength={60}
+          aria-label="Title"
+          title="Title"
+        />
+      </section>
 
-        <section className="field">
-          <h2 className="label">Image</h2>
-          <div
-            className={`drop${over ? ' over' : ''}${img ? ' has' : ''}`}
-            onClick={() => input.current.click()}
-            onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && input.current.click()}
-            role="button"
-            tabIndex={0}
-            title={img ? 'Change image (or paste one)' : 'Upload, drop or paste an image'}
-            onDragOver={(e) => {
-              e.preventDefault()
-              setOver(true)
-            }}
-            onDragLeave={() => setOver(false)}
-            onDrop={(e) => {
-              e.preventDefault()
-              setOver(false)
-              pick(e.dataTransfer.files[0])
-            }}
-          >
-            {img ? (
-              <Preview img={img} {...grid} shape={shape} seed={seed} />
-            ) : (
-              <span className="drop-empty">
-                <span className="drop-icon">
-                  <Upload className="big" />
-                </span>
-                <span className="drop-hint">Click to upload, drop an image here, or just paste one</span>
+      <div className="create-media">
+        <div
+          className={`drop${over ? ' over' : ''}${img ? ' has' : ''}`}
+          onClick={() => input.current.click()}
+          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && input.current.click()}
+          role="button"
+          tabIndex={0}
+          title={img ? 'Change image (or paste one)' : 'Upload, drop or paste an image'}
+          onDragOver={(e) => {
+            e.preventDefault()
+            setOver(true)
+          }}
+          onDragLeave={() => setOver(false)}
+          onDrop={(e) => {
+            e.preventDefault()
+            setOver(false)
+            pick(e.dataTransfer.files[0])
+          }}
+        >
+          {img ? (
+            <Preview img={img} {...grid} shape={shape} seed={seed} />
+          ) : (
+            <span className="drop-empty">
+              <span className="drop-icon">
+                <Upload className="big" />
               </span>
-            )}
-            <input ref={input} type="file" accept="image/*" onChange={(e) => pick(e.target.files[0])} />
-          </div>
-          <div className="or" aria-hidden="true">
-            or
-          </div>
-          <form className="row" onSubmit={fromLink}>
-            <input
-              className={`text${linkError ? ' bad' : ''}`}
-              type="url"
-              value={link}
-              onChange={(e) => {
-                setLink(e.target.value)
-                setLinkError(false)
-              }}
-              placeholder="Link to image"
-              aria-label="Link to image"
-              title="Link to image"
-            />
-            <button className="secondary" disabled={!link.trim() || fetching} title="Load image">
-              {fetching ? <span className="spin" /> : 'Load'}
-            </button>
-          </form>
-        </section>
-
-        <section className="field">
-          <h2 className="label">Pieces</h2>
-          <div className="row slider">
-            <input
-              type="range"
-              style={{ '--p': `${slider}%` }}
-              min="0"
-              max="100"
-              value={slider}
-              onChange={(e) => {
-                setCount(toCount(+e.target.value))
-                setTyped(null)
-              }}
-              aria-label="Pieces"
-              title="Number of pieces"
-            />
-            <input
-              className="num"
-              type="text"
-              inputMode="numeric"
-              value={typed ?? grid.cols * grid.rows}
-              onChange={(e) => {
-                const v = e.target.value.replace(/\D/g, '').slice(0, 4)
-                setTyped(v)
-                if (+v >= MIN) setCount(clampCount(+v))
-              }}
-              onFocus={(e) => e.target.select()}
-              onBlur={() => {
-                if (typed && +typed) setCount(clampCount(+typed))
-                setTyped(null)
-              }}
-              onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-              aria-label="Number of pieces"
-              title={`Type a number of pieces, ${MIN} to ${MAX}`}
-            />
-          </div>
-        </section>
-
-        <section className="field">
-          <h2 className="label">Shape</h2>
-          <div className="shapes">
-            {SHAPES.map((s) => (
-              <button
-                key={s}
-                className={`shape${s === shape ? ' on' : ''}`}
-                onClick={() => setShape(s)}
-                aria-label={s}
-                title={s[0].toUpperCase() + s.slice(1)}
-              >
-                <ShapeIcon shape={s} />
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="field">
-          <h2 className="label">Mode</h2>
-          <button
-            className={`toggle${hardcore ? ' on' : ''}`}
-            role="switch"
-            aria-checked={hardcore}
-            onClick={() => setHardcore((v) => !v)}
-            title="Hardcore mode"
-          >
-            <span className="toggle-text">
-              <span>Hardcore mode</span>
-              <span className="toggle-hint">All pieces start in one messy pile, many face down. Click a piece to turn it face up.</span>
+              <span className="drop-hint">Click to upload, drop an image here, or just paste one</span>
             </span>
-            <span className="toggle-track" aria-hidden="true">
-              <span className="toggle-knob" />
-            </span>
+          )}
+          <input ref={input} type="file" accept="image/*" onChange={(e) => pick(e.target.files[0])} />
+        </div>
+        <form className="row link-row" onSubmit={fromLink}>
+          <input
+            className={`text${linkError ? ' bad' : ''}`}
+            type="url"
+            value={link}
+            onChange={(e) => {
+              setLink(e.target.value)
+              setLinkError(false)
+            }}
+            placeholder="Or paste a link to an image"
+            aria-label="Link to image"
+            title="Link to image"
+          />
+          <button className="secondary" disabled={!link.trim() || fetching} title="Load image">
+            {fetching ? <span className="spin" /> : 'Load'}
           </button>
-        </section>
+        </form>
+      </div>
 
-        <section className="field">
-          <h2 className="label">Visibility</h2>
-          <button
-            className={`toggle${hidden ? ' on' : ''}`}
-            role="switch"
-            aria-checked={hidden}
-            onClick={() => setHidden((v) => !v)}
-            title="Private room"
-          >
-            <span className="toggle-text">
-              <span>Private room</span>
-              <span className="toggle-hint">Only people with the link can see and play this jigsaw.</span>
-            </span>
-            <span className="toggle-track" aria-hidden="true">
-              <span className="toggle-knob" />
-            </span>
-          </button>
-        </section>
-
-        {hidden && (
-          <section className="field">
-            <h2 className="label">Invite players</h2>
-            <InviteList selected={invited} onChange={setInvited} />
+      <div className="create-settings">
+        <div className="row pieces-row">
+          <section className="field grow">
+            <h2 className="label">Pieces</h2>
+            <div className="row slider">
+              <input
+                type="range"
+                style={{ '--p': `${slider}%` }}
+                min="0"
+                max="100"
+                value={slider}
+                onChange={(e) => {
+                  setCount(toCount(+e.target.value))
+                  setTyped(null)
+                }}
+                aria-label="Pieces"
+                title="Number of pieces"
+              />
+              <input
+                className="num"
+                type="text"
+                inputMode="numeric"
+                value={typed ?? grid.cols * grid.rows}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/\D/g, '').slice(0, 4)
+                  setTyped(v)
+                  if (+v >= MIN) setCount(clampCount(+v))
+                }}
+                onFocus={(e) => e.target.select()}
+                onBlur={() => {
+                  if (typed && +typed) setCount(clampCount(+typed))
+                  setTyped(null)
+                }}
+                onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                aria-label="Number of pieces"
+                title={`Type a number of pieces, ${MIN} to ${MAX}`}
+              />
+            </div>
           </section>
-        )}
+          <section className="field">
+            <h2 className="label">Shape</h2>
+            <ShapePicker value={shape} onChange={setShape} />
+          </section>
+        </div>
+
+        <section className="field">
+          <h2 className="label">Options</h2>
+          <div className="options">
+            {option(hardcore, setHardcore, 'Hardcore mode', 'One messy pile, many pieces face down.')}
+            {option(hidden, setHidden, 'Private room', 'Only people with the link can join.')}
+            {hidden && (
+              <div className="options-invite">
+                <h3 className="label">Invite players</h3>
+                <InviteList selected={invited} onChange={setInvited} />
+              </div>
+            )}
+          </div>
+        </section>
 
         <button
           className="primary wide"
@@ -375,6 +407,7 @@ export default function NewRoom() {
             </>
           )}
         </button>
+      </div>
     </section>
   )
 }
