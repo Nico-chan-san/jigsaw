@@ -94,7 +94,7 @@ export default function NewRoom() {
   // What's in the number field while typing; null shows the actual piece count.
   const [typed, setTyped] = useState(null)
   const [shape, setShape] = useState('classic')
-  const [annoying, setAnnoying] = useState(false)
+  const [hardcore, setHardcore] = useState(false)
   const [hidden, setHidden] = useState(false)
   // Players to email the private jigsaw's link to, by id.
   const [invited, setInvited] = useState(() => new Set())
@@ -179,10 +179,10 @@ export default function NewRoom() {
         name: name.trim() || 'Jigsaw',
         image: full.data,
         thumb: thumb.data,
-        annoying,
+        annoying: hardcore,
         private: hidden,
         invite: hidden ? [...invited] : [],
-        pieces: annoying ? pile(room) : scatter(room),
+        pieces: hardcore ? pile(room) : scatter(room),
         passphrase: currentPlayer()?.passphrase,
       })
       openRoom(id)
@@ -318,15 +318,15 @@ export default function NewRoom() {
         <section className="field">
           <h2 className="label">Mode</h2>
           <button
-            className={`toggle${annoying ? ' on' : ''}`}
+            className={`toggle${hardcore ? ' on' : ''}`}
             role="switch"
-            aria-checked={annoying}
-            onClick={() => setAnnoying((v) => !v)}
-            title="Annoying mode"
+            aria-checked={hardcore}
+            onClick={() => setHardcore((v) => !v)}
+            title="Hardcore mode"
           >
             <span className="toggle-text">
-              <span>Annoying mode</span>
-              <span className="toggle-hint">All pieces start in one messy pile, many face down. Click a piece to flip it.</span>
+              <span>Hardcore mode</span>
+              <span className="toggle-hint">All pieces start in one messy pile, many face down. Click a piece to turn it face up.</span>
             </span>
             <span className="toggle-track" aria-hidden="true">
               <span className="toggle-knob" />

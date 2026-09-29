@@ -92,7 +92,7 @@ export class Engine {
     this.r = new Int8Array(n)
     this.g = new Int32Array(n)
     this.by = new Array(n).fill(null)
-    // Face down pieces (annoying mode), their back sprites, and flips in progress: i -> start time.
+    // Face down pieces (hardcore mode), their back sprites, and flips in progress: i -> start time.
     this.f = new Uint8Array(n)
     this.backs = new Array(n)
     this.flips = new Map()
@@ -800,6 +800,9 @@ export class Engine {
   onMove(e) {
     const [sx, sy] = this.pos(e)
     if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, [sx, sy])
+    // Pressing the right button while holding pieces turns them, like space. A second button on a
+    // pointer that is already down arrives as a move with e.button set, not as a pointerdown.
+    if (this.drag && e.pointerId === this.drag.pointer && e.button === 2 && e.buttons & 2) this.spin(1, e.shiftKey)
 
     const c = this.carry
     if (c && e.pointerId === c.pointer) {
@@ -1043,7 +1046,7 @@ export class Engine {
       tx: new Float64Array(ids.length),
       ty: new Float64Array(ids.length),
       spinning: false,
-      // A press that neither moves nor turns anything is a click (flips a piece in annoying mode).
+      // A press that neither moves nor turns anything is a click (flips a piece in hardcore mode).
       t0: performance.now(),
       sx0: sx,
       sy0: sy,
@@ -1405,9 +1408,10 @@ export class Engine {
     this.commit(changed)
   }
 
-  // Turns a loose piece over. Pieces in a module are always face up, so they stay put.
+  // Turns a loose face down piece face up. It never goes back, so clicking a piece to select it is
+  // safe. Pieces in a module are always face up, so they stay put.
   flip(i) {
-    if (this.connected(i)) return
+    if (!this.f[i] || this.connected(i)) return
     this.f[i] ^= 1
     this.flips.set(i, performance.now())
     // The landing sprite still shows the old side; draw the piece itself so the flip is visible.

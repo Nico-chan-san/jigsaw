@@ -8,9 +8,10 @@ const SECTIONS = [
     title: 'Mouse',
     rows: [
       [<Key key="lp">Drag a piece</Key>, 'Move it'],
-      [<Key key="lc">Click a piece</Key>, 'Select it (and flip it in annoying mode)'],
+      [<Key key="lc">Click a piece</Key>, 'Select it (and turn it face up in hardcore mode)'],
       [<Key key="lt">Drag the table</Key>, 'Select'],
       [<Key key="r">Right drag</Key>, 'Pan'],
+      [<Key key="rc">Right click while dragging</Key>, 'Rotate held pieces'],
       [<Key key="w">Scroll</Key>, 'Zoom'],
     ],
   },
