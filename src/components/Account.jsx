@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState } from 'react'
 import { Arrow, Check, Copy } from './icons.jsx'
+import TextField from './TextField.jsx'
 
 // The player's passphrase as four word chips, with a button that copies it.
 export function Passphrase({ value }) {
@@ -65,8 +66,8 @@ export function EmailForm({ action, create = false, onSubmit }) {
 
   return (
     <form className="email-form" onSubmit={submit}>
-      <input
-        className={`text${error ? ' bad' : ''}`}
+      <TextField
+        bad={!!error}
         type="email"
         autoFocus
         value={email}
@@ -79,8 +80,8 @@ export function EmailForm({ action, create = false, onSubmit }) {
         aria-label="Email"
         title="Email"
       />
-      <input
-        className={`text${error ? ' bad' : ''}`}
+      <TextField
+        bad={!!error}
         type="password"
         value={password}
         onChange={(e) => (setPassword(e.target.value), setError(''))}
@@ -221,8 +222,8 @@ export default function AccountPrompt({ mode: start, name, player, onSignUp, onL
           <p className="modal-text">Enter the four word passphrase you got when you first picked a name.</p>
         )}
         <div className="row">
-          <input
-            className={`text${error ? ' bad' : ''}`}
+          <TextField
+            bad={!!error}
             autoFocus
             value={value}
             onChange={(e) => {

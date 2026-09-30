@@ -7,8 +7,10 @@ const FLUSH_MS = 15000
 
 const fmt = formatTime
 
-// Time only accrues while this window is visible and focused, and the jigsaw is unfinished.
-const active = () => document.visibilityState === 'visible' && document.hasFocus()
+// Time only accrues while this window is visible and focused, no dialog is open over the board (the
+// settings drop-down doesn't count), and the jigsaw is unfinished.
+const active = () =>
+  document.visibilityState === 'visible' && document.hasFocus() && !document.querySelector('.modal-bg')
 
 // Time is kept per player id (me), since names aren't unique.
 export default function Timers({ roomId, me: name, initial, busRef, stopped, onTimes }) {

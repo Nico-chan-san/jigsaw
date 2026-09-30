@@ -12,7 +12,7 @@ export default function Sheet({ title, onBack, onClose, closing, right, children
   }, [onClose, closing])
 
   return (
-    <div className={`modal-bg${closing ? ' closing' : ''}`} onPointerDown={(e) => e.target === e.currentTarget && onClose?.()}>
+    <div className={`modal-bg sheet-bg${closing ? ' closing' : ''}`} onPointerDown={(e) => e.target === e.currentTarget && onClose?.()}>
       <div className="modal sheet" role="dialog" aria-label={title}>
         <div className="sheet-head">
           <div className="title">

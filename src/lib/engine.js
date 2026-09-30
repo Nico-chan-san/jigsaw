@@ -43,8 +43,11 @@ const makeCanvas = (w, h) => {
   c.height = h
   return c
 }
-// Arrow keys and WASD move the camera, at this many screen pixels per second.
+// Arrow keys and WASD move the camera, at this many screen pixels per second, speeding up the
+// longer they are held: up to PAN_BOOST times as fast after PAN_RAMP ms.
 const PAN_SPEED = 900
+const PAN_BOOST = 3.5
+const PAN_RAMP = 1500
 const PAN_KEYS = {
   ArrowLeft: [-1, 0],
   ArrowRight: [1, 0],
@@ -210,6 +213,8 @@ export class Engine {
     this.pointers = new Map()
     // Pan keys held down right now.
     this.panKeys = new Set()
+    // When the pan keys were first pressed, for speeding up while held.
+    this.panSince = 0
     // View mode: the left button (and a finger) moves the table instead of pieces or selecting.
     this.panMode = false
     this.held = new Map()
@@ -1131,13 +1136,13 @@ export class Engine {
       if (key !== ' ' && key !== 'g') return
       e.preventDefault()
       if (e.repeat) return
-      return key === ' ' ? this.spin(1, e.shiftKey) : this.gather()
+      return key === ' ' ? this.spin(1, e.shiftKey) : this.gather(e.shiftKey)
     }
     // With a selection on the table, space turns the pieces where they lie (shift: all as one) and G
-    // sorts them into a grid.
+    // sorts them into a grid (shift: in random order).
     if ((key === ' ' || key === 'g') && this.sel.size) {
       e.preventDefault()
-      if (!e.repeat) key === 'g' ? this.sortSelection() : this.rotateSelection(1, e.shiftKey)
+      if (!e.repeat) key === 'g' ? this.sortSelection(e.shiftKey) : this.rotateSelection(1, e.shiftKey)
     }
   }
 
@@ -1343,7 +1348,8 @@ export class Engine {
   }
 
   // G while holding several groups: pulls them together in a grid around the pointer, none overlapping.
-  gather() {
+  // With shuffle (shift), the groups go in random order.
+  gather(shuffle = false) {
     const d = this.drag
     if (!d) return
     const at = new Map(d.ids.map((i, j) => [i, j]))
@@ -1360,7 +1366,7 @@ export class Engine {
       }
       return b
     })
-    const spots = pack(boxes, this.geo.S)
+    const spots = pack(boxes, this.geo.S, shuffle)
     mods.forEach((js, m) => {
       const b = boxes[m]
       const dx = spots[m][0] - (b.x0 + b.x1) / 2
@@ -1421,7 +1427,8 @@ export class Engine {
   }
 
   // Lays the selected modules out in a square grid, centred where the selection lies now.
-  sortSelection() {
+  // With shuffle (shift), in random order rather than the order they lie in.
+  sortSelection(shuffle = false) {
     if (this.guard && !this.guard()) return
     const ids = this.freeSelection()
     if (!ids.length) return
@@ -1431,7 +1438,7 @@ export class Engine {
     const cx = (all.x0 + all.x1) / 2
     const cy = (all.y0 + all.y1) / 2
     const boxes = mods.map((m) => this.bbox(m, this.packExtent))
-    const spots = pack(boxes, this.geo.S)
+    const spots = pack(boxes, this.geo.S, shuffle)
     const x0 = this.x.slice()
     const y0 = this.y.slice()
     mods.forEach((m, k) => {
@@ -1938,7 +1945,9 @@ export class Engine {
         vy += PAN_KEYS[k][1]
       }
       if (vx || vy) {
-        const f = (PAN_SPEED * dt) / 1000 / Math.hypot(vx, vy) / this.cam.z
+        this.panSince ||= now
+        const boost = 1 + (PAN_BOOST - 1) * Math.min(1, (now - this.panSince) / PAN_RAMP) ** 2
+        const f = (PAN_SPEED * boost * dt) / 1000 / Math.hypot(vx, vy) / this.cam.z
         this.cam.x += vx * f
         this.cam.y += vy * f
         this.clampCam()
@@ -1946,9 +1955,9 @@ export class Engine {
           this.updatePivot()
           this.sendLive()
         }
-      }
+      } else this.panSince = 0
       again = true
-    }
+    } else this.panSince = 0
 
     if (this.drag) {
       const d = this.drag

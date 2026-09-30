@@ -25,7 +25,7 @@ const SECTIONS = [
           <Key>S</Key>
           <Key>D</Key>
         </>,
-        'Pan (arrow keys too)',
+        'Pan (arrow keys too), faster the longer you hold',
       ],
       [<Key key="sp">Space</Key>, 'Rotate held or selected pieces'],
       [
@@ -38,12 +38,20 @@ const SECTIONS = [
       [<Key key="g">G</Key>, 'Sort selected pieces into a grid'],
       [
         <>
+          <Key>Shift</Key>
+          <Key>G</Key>
+        </>,
+        'Sort them into a grid in random order',
+      ],
+      [
+        <>
           <Key>+</Key>
           <Key>-</Key>
         </>,
         'Zoom',
       ],
       [<Key key="c">C</Key>, 'Fit to screen'],
+      [<Key key="f">F</Key>, 'Fullscreen'],
       [<Key key="h">H</Key>, 'This help'],
       [<Key key="v">V</Key>, 'View mode: dragging only moves the table'],
       [<Key key="m">M</Key>, 'Side menu: modules, notes and images'],

@@ -4,6 +4,7 @@ import { api } from '../lib/api.js'
 import { useApp } from '../App.jsx'
 import { Check, Copy, Lock } from './icons.jsx'
 import InviteList from './Invite.jsx'
+import TextField from './TextField.jsx'
 
 // Explains that this jigsaw is private and gives its link, with a button that copies it.
 export default function PrivateRoom({ id, onClose }) {
@@ -66,8 +67,7 @@ export default function PrivateRoom({ id, onClose }) {
           Only people with the link can see and play this jigsaw. It shows up in their jigsaws once they have opened it.
         </p>
         <div className="room-link">
-          <input
-            className="text"
+          <TextField
             value={link}
             readOnly
             onFocus={(e) => e.target.select()}

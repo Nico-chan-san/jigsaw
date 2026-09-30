@@ -1,22 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from '../App.jsx'
-import { External, Gear, GitHub, Lock, Logout, Moon, User } from './icons.jsx'
-import AccountDialog from './AccountDialog.jsx'
+import { Changelog as ChangelogIcon, Dock, External, Gear, GitHub, Lock, Logout, Moon, User } from './icons.jsx'
+import Changelog from './Changelog.jsx'
+import AccountDialog, { LogoutConfirm } from './AccountDialog.jsx'
 import { useLinger } from '../lib/linger.js'
-import { Passphrase } from './Account.jsx'
-import Confirm from './Confirm.jsx'
 import PrivateRoom from './PrivateRoom.jsx'
 
-// Header button that toggles a small settings panel: account, dark mode, source link and log out.
+// Header button that toggles a small settings panel: account, dark mode, top toolbar, changelog, source link and log out.
 // In a private jigsaw it also has a button that shows its link.
 export default function Settings({ privateRoom = false }) {
-  const { theme, toggleTheme, player, logout, roomId } = useApp()
+  const { theme, toggleTheme, dock, toggleDock, player, roomId } = useApp()
   const [sharing, setSharing] = useState(false)
   const closeSharing = useCallback(() => setSharing(false), [])
   const [open, setOpen] = useState(false)
   const [account, setAccount] = useState(false)
   const closeAccount = useCallback(() => setAccount(false), [])
   const [accountShown, accountClosing] = useLinger(account)
+  const [changelog, setChangelog] = useState(false)
+  const closeChangelog = useCallback(() => setChangelog(false), [])
+  const [changelogShown, changelogClosing] = useLinger(changelog)
   const [leaving, setLeaving] = useState(false)
   const stay = useCallback(() => setLeaving(false), [])
   const wrap = useRef(null)
@@ -78,6 +80,24 @@ export default function Settings({ privateRoom = false }) {
             <span>Dark mode</span>
             <span className={`switch${dark ? ' on' : ''}`} aria-hidden="true" />
           </button>
+          {roomId && (
+            <button className="settings-row" role="menuitemcheckbox" aria-checked={dock} onClick={toggleDock}>
+              <Dock />
+              <span>Top toolbar</span>
+              <span className={`switch${dock ? ' on' : ''}`} aria-hidden="true" />
+            </button>
+          )}
+          <button
+            className="settings-row"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false)
+              setChangelog(true)
+            }}
+          >
+            <ChangelogIcon />
+            <span>Changelog</span>
+          </button>
           <a
             className="settings-row"
             role="menuitem"
@@ -107,25 +127,8 @@ export default function Settings({ privateRoom = false }) {
       )}
       {sharing && roomId && <PrivateRoom id={roomId} onClose={closeSharing} />}
       {accountShown && <AccountDialog onClose={closeAccount} closing={accountClosing} />}
-      {leaving && player && (
-        <Confirm
-          title={`Log out ${player.name}?`}
-          text={
-            player.email
-              ? `You can log back in with ${player.email} and your password.`
-              : 'You can log back in with your passphrase:'
-          }
-          action="Log out"
-          danger
-          onCancel={stay}
-          onConfirm={() => {
-            logout()
-            setLeaving(false)
-          }}
-        >
-          {!player.email && <Passphrase value={player.passphrase} />}
-        </Confirm>
-      )}
+      {changelogShown && <Changelog onClose={closeChangelog} closing={changelogClosing} />}
+      {leaving && <LogoutConfirm onDone={stay} />}
     </span>
   )
 }

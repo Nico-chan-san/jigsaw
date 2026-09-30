@@ -1,5 +1,17 @@
 # Agent notes
 
+## Changelog
+
+`CHANGELOG.md` is shown to players in the changelog dialog (Settings > Changelog), so write it for them: short, plain sentences about what changed for them, not about the code.
+
+- Add an entry for every change a player would notice: new features, changed behaviour, visible fixes, noticeably better performance. Skip refactors, tooling and changes to these notes. Update the entry as a change evolves rather than adding a second one.
+- Each `## ` section is one day, titled with the date, for example `## 30 September 2026`. Newest section first. Add entries to today's section, starting it above the others if it isn't there yet.
+- Entries are `- ` bullets. The dialog renders `**bold**`, `` `code` `` and `[links](url)`, nothing else.
+
+## UI components
+
+- Every text field is a `TextField` (`src/components/TextField.jsx`), never a bare `<input className="text">`, so all fields share one size and look. Use its `bad` and `compact` props instead of adding size overrides in CSS. Range, file and the small number box in the new jigsaw form are not text fields.
+
 ## Database changes
 
 The SQLite database in `data/` is live in production, so schema changes must never break an existing database.

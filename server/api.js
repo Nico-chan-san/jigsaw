@@ -320,6 +320,13 @@ function createApi(dbFile) {
     for (const ws of sockets.get(roomId) || []) if (ws.player) ids.add(ws.player.id)
     return [...ids]
   }
+  // Everyone in a room counts as seen now, once a minute: if the server stops without their sockets
+  // closing, "last played" is still about right.
+  setInterval(() => {
+    const now = Date.now()
+    for (const roomId of sockets.keys()) for (const id of online(roomId)) q.setSeen.run(roomId, id, now)
+  }, 60000).unref()
+
   // Tells the room who is here, and when anyone who just left was last seen.
   function presence(roomId, left) {
     const seen = {}

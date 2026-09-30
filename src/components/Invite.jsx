@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../lib/api.js'
 import { useApp } from '../App.jsx'
 import { Check } from './icons.jsx'
+import TextField from './TextField.jsx'
 
 // Players with an email address to pick for an invite to a private jigsaw. selected is a Set of
 // player ids. With room, players who already have that jigsaw are shown but can't be picked.
@@ -38,8 +39,7 @@ export default function InviteList({ room = '', selected, onChange }) {
   return (
     <div className="invite">
       {list.length > 6 && (
-        <input
-          className="text"
+        <TextField
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="Find a player"

@@ -2,7 +2,18 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
 import { Engine } from '../lib/engine.js'
 import { navigate, store, useApp } from '../App.jsx'
-import { Fit, Hand, Help as HelpIcon, Layers, Minus, Picture, Plus, Rooms } from '../components/icons.jsx'
+import {
+  ExitFullscreen,
+  Fit,
+  Fullscreen,
+  Hand,
+  Help as HelpIcon,
+  Layers,
+  Minus,
+  Picture,
+  Plus,
+  Rooms,
+} from '../components/icons.jsx'
 import Help from '../components/Help.jsx'
 import Settings from '../components/Settings.jsx'
 import { AccountButton } from '../components/AccountDialog.jsx'
@@ -76,6 +87,80 @@ const KeyHint = ({ k }) => (
   </span>
 )
 
+// The controls fade away after this long without the pointer moving or a key being pressed.
+const IDLE_MS = 3000
+
+// Fullscreen for the whole page (Safari still only has the prefixed version).
+const fullscreenEl = () => document.fullscreenElement || document.webkitFullscreenElement || null
+const canFullscreen = () => {
+  const el = document.documentElement
+  return !!(el.requestFullscreen || el.webkitRequestFullscreen)
+}
+function toggleFullscreen() {
+  if (fullscreenEl()) return (document.exitFullscreen || document.webkitExitFullscreen)?.call(document)
+  const el = document.documentElement
+  const go = el.requestFullscreen || el.webkitRequestFullscreen
+  const done = go?.call(el, { navigationUI: 'hide' })
+  // Normally Escape always leaves fullscreen. Where the browser lets us keep it (Chrome, Edge),
+  // Escape clears the selection first (see Room), and holding it down leaves fullscreen.
+  done?.then?.(() => navigator.keyboard?.lock?.(['Escape']).catch(() => {}), () => {})
+}
+
+// Browsers report no safe area for the notch on MacBooks, even in fullscreen. Those screens are
+// 16:10 plus a strip at the top for the notch (1512x982 is 1512x945 and 37 more, at any scaling),
+// so on a Mac the extra height over 16:10, if it is a few percent, is the notch.
+function notchHeight() {
+  if (!/Mac/.test(navigator.platform) || navigator.maxTouchPoints > 1) return 0
+  const extra = screen.height - screen.width / 1.6
+  return extra > screen.height * 0.025 && extra < screen.height * 0.055 ? Math.round(extra) : 0
+}
+
+function useFullscreen() {
+  const [on, setOn] = useState(() => !!fullscreenEl())
+  useEffect(() => {
+    const change = () => {
+      setOn(!!fullscreenEl())
+      if (!fullscreenEl()) navigator.keyboard?.unlock?.()
+    }
+    document.addEventListener('fullscreenchange', change)
+    document.addEventListener('webkitfullscreenchange', change)
+    return () => {
+      document.removeEventListener('fullscreenchange', change)
+      document.removeEventListener('webkitfullscreenchange', change)
+    }
+  }, [])
+  return on
+}
+
+// True once nothing has happened for IDLE_MS. Stays false while the pointer is over the controls,
+// a menu or dialog is open, or the last input was touch (a tap on a hidden button would reach the
+// table instead).
+function useIdle() {
+  const [idle, setIdle] = useState(false)
+  useEffect(() => {
+    let timer = 0
+    let over = false
+    let touch = false
+    const busy = () => over || touch || document.querySelector('.modal-bg, .settings-menu, .react-menu, .float :focus-visible')
+    const sleep = () => (busy() ? (timer = setTimeout(sleep, IDLE_MS)) : setIdle(true))
+    const wake = (e) => {
+      if (e.type !== 'keydown') over = !!e.target?.closest?.('.float, .side, .players, .podium-btn')
+      if (e.pointerType) touch = e.pointerType === 'touch'
+      setIdle(false)
+      clearTimeout(timer)
+      timer = setTimeout(sleep, IDLE_MS)
+    }
+    const events = ['pointermove', 'pointerdown', 'wheel', 'keydown']
+    for (const ev of events) window.addEventListener(ev, wake, { capture: true, passive: true })
+    timer = setTimeout(sleep, IDLE_MS)
+    return () => {
+      clearTimeout(timer)
+      for (const ev of events) window.removeEventListener(ev, wake, { capture: true, passive: true })
+    }
+  }, [])
+  return idle
+}
+
 function readColors() {
   const s = getComputedStyle(document.documentElement)
   return {
@@ -99,7 +184,7 @@ function takeLocalRefs(id) {
 }
 
 export default function Room({ id }) {
-  const { name, player, playerId, theme, ensureName, requireName, setDialog } = useApp()
+  const { name, player, playerId, theme, ensureName, requireName, setDialog, dock } = useApp()
   const me = useRef(playerId)
   me.current = playerId
   const sockRef = useRef(null)
@@ -140,6 +225,9 @@ export default function Room({ id }) {
   const onTimes = useCallback((t) => setTimes(t), [])
   const onNotes = useCallback((n) => setNotes(n), [])
   const [ready, setReady] = useState(false)
+  const fullscreen = useFullscreen()
+  const notch = fullscreen ? notchHeight() : 0
+  const idle = useIdle()
   const [error, setError] = useState(false)
   const [side, setSide] = useState(() => store.get('side') === '1')
   // View mode: dragging with the left button (or a finger) moves the table, never pieces or notes.
@@ -233,6 +321,8 @@ export default function Room({ id }) {
             eng.resync(fresh.pieces)
             eng.setRefs(fresh.refs || [])
             learn(fresh.players)
+            setOnline(new Set(fresh.online || []))
+            setSeen(fresh.seen || {})
             noteBus.current?.({ type: 'notes-reset', notes: fresh.notes || [] })
           },
         })
@@ -295,7 +385,23 @@ export default function Room({ id }) {
     if (error) navigate('/rooms')
   }, [error])
 
-  // H help, V view mode, M side menu (modules, notes, images), P players, N note, I image, + and - zoom, C centres. Arrow keys and WASD pan (see the engine). New notes and images go under the pointer when it's on the table.
+  // Escape in fullscreen (when the browser passes it on, see toggleFullscreen): anything open or
+  // selected goes first, as usual. With nothing left for it to do, it leaves fullscreen. This runs
+  // in the capture phase, so it sees the state from before the other handlers clear it.
+  useEffect(() => {
+    if (!engine) return
+    const key = (e) => {
+      if (e.key !== 'Escape' || e.repeat || !fullscreenEl()) return
+      if (e.target?.closest?.('input, textarea, [contenteditable]')) return
+      if (document.querySelector('.modal-bg, .settings-menu, .react-menu, .react-pick [aria-pressed="true"]')) return
+      if (engine.drag || engine.selCount || engine.refSel) return
+      toggleFullscreen()
+    }
+    window.addEventListener('keydown', key, true)
+    return () => window.removeEventListener('keydown', key, true)
+  }, [engine])
+
+  // H help, V view mode, M side menu (modules, notes, images), P players, N note, I image, + and - zoom, C centres, F fullscreen. Arrow keys and WASD pan (see the engine). New notes and images go under the pointer when it's on the table.
   useEffect(() => {
     if (!engine) return
     const key = (e) => {
@@ -317,6 +423,7 @@ export default function Room({ id }) {
       else if (k === '+' || k === '=') engine.zoomBy(1.4)
       else if (k === '-' || k === '_') engine.zoomBy(1 / 1.4)
       else if (k === 'c') engine.fit()
+      else if (k === 'f' && canFullscreen()) toggleFullscreen()
       else return
       e.preventDefault()
     }
@@ -324,67 +431,134 @@ export default function Room({ id }) {
     return () => window.removeEventListener('keydown', key)
   }, [engine])
 
+  // The toolbar buttons, in four groups: in the corners and top middle, or (with the top toolbar
+  // setting) all in one bar at the top middle, separated. Both layouts are the same elements with
+  // other classes, so switching keeps the timers and menus as they are.
+  const nav = (
+    <>
+      <button className="icon-btn" onClick={() => setDialog('rooms')} aria-label="All jigsaws" title="All jigsaws">
+        <Rooms />
+      </button>
+      <button
+        className={`icon-btn${side ? ' on' : ''}`}
+        onClick={() => setSide((s) => !s)}
+        aria-label="Overview"
+        aria-keyshortcuts="M"
+        title="Groups, notes and images (M)"
+      >
+        <Layers />
+        <KeyHint k="M" />
+      </button>
+    </>
+  )
+  const play = engine && (
+    <>
+      <button
+        className={`icon-btn view-btn${panMode ? ' on' : ''}`}
+        onClick={() => setPanMode((v) => !v)}
+        aria-pressed={panMode}
+        aria-label="View mode"
+        aria-keyshortcuts="V"
+        title={panMode ? 'View mode on: dragging moves the table (V)' : 'View mode: drag to move the table (V)'}
+      >
+        <Hand />
+        <KeyHint k="V" />
+      </button>
+      <Reactions engine={engine} busRef={reactBus} hint={<KeyHint k="R" />} />
+      <span className="sep" />
+      <button
+        className={`stats-btn${players ? ' on' : ''}`}
+        onClick={() => setPlayers((s) => !s)}
+        aria-pressed={players}
+        aria-keyshortcuts="P"
+        title={players ? 'Hide players (P)' : 'Show players (P)'}
+      >
+        <Timers roomId={id} me={playerId} initial={data.times} busRef={timeBus} stopped={done} onTimes={onTimes} />
+        <KeyHint k="P" />
+      </button>
+      <span className="sep" />
+      <NoteButton createRef={createNote} hint={<KeyHint k="N" />} />
+      <button
+        className="icon-btn"
+        onClick={() => engine.addRef()}
+        aria-label="Reference image"
+        aria-keyshortcuts="I"
+        title="Add the reference image to the board (I)"
+      >
+        <Picture />
+        <KeyHint k="I" />
+      </button>
+    </>
+  )
+  const account = (
+    <>
+      <button
+        className="icon-btn"
+        onClick={() => setHelp(true)}
+        aria-label="How to play"
+        aria-keyshortcuts="H"
+        title="How to play (H)"
+      >
+        <HelpIcon />
+        <KeyHint k="H" />
+      </button>
+      <AccountButton />
+      <Settings privateRoom={!!data?.private} />
+    </>
+  )
+  const view = (
+    <>
+      <button
+        className="icon-btn"
+        onClick={() => engine?.zoomBy(1 / 1.4)}
+        aria-label="Zoom out"
+        aria-keyshortcuts="-"
+        title="Zoom out (-)"
+      >
+        <Minus />
+        <KeyHint k="-" />
+      </button>
+      <button className="icon-btn" onClick={() => engine?.fit()} aria-label="Fit" aria-keyshortcuts="C" title="Fit to screen (C)">
+        <Fit />
+        <KeyHint k="C" />
+      </button>
+      <button
+        className="icon-btn"
+        onClick={() => engine?.zoomBy(1.4)}
+        aria-label="Zoom in"
+        aria-keyshortcuts="+"
+        title="Zoom in (+)"
+      >
+        <Plus />
+        <KeyHint k="+" />
+      </button>
+      {canFullscreen() && <span className="sep" />}
+      {canFullscreen() && (
+        <button
+          className={`icon-btn${fullscreen ? ' on' : ''}`}
+          onClick={toggleFullscreen}
+          aria-pressed={fullscreen}
+          aria-label="Fullscreen"
+          aria-keyshortcuts="F"
+          title={fullscreen ? 'Leave fullscreen (F)' : 'Fullscreen (F)'}
+        >
+          {fullscreen ? <ExitFullscreen /> : <Fullscreen />}
+          <KeyHint k="F" />
+        </button>
+      )}
+    </>
+  )
+
   return (
-    <div className={`room${panMode ? ' pan-mode' : ''}`}>
+    <div
+      className={`room${panMode ? ' pan-mode' : ''}${idle ? ' idle' : ''}${notch ? ' notch' : ''}${dock ? ' docked' : ''}`}
+      style={notch ? { '--notch': `${notch}px` } : undefined}
+    >
       <canvas ref={canvas} className="board" tabIndex={0} />
       <div ref={tip} className="tip" />
       {!engine && (
         <div className="center">
           <span className="spin" />
-        </div>
-      )}
-      <div className="float tl">
-        <button className="icon-btn" onClick={() => setDialog('rooms')} aria-label="All jigsaws" title="All jigsaws">
-          <Rooms />
-        </button>
-        <button
-          className={`icon-btn${side ? ' on' : ''}`}
-          onClick={() => setSide((s) => !s)}
-          aria-label="Overview"
-          aria-keyshortcuts="M"
-          title="Groups, notes and images (M)"
-        >
-          <Layers />
-          <KeyHint k="M" />
-        </button>
-      </div>
-      {engine && (
-        <div className="float tc">
-          <button
-            className={`icon-btn view-btn${panMode ? ' on' : ''}`}
-            onClick={() => setPanMode((v) => !v)}
-            aria-pressed={panMode}
-            aria-label="View mode"
-            aria-keyshortcuts="V"
-            title={panMode ? 'View mode on: dragging moves the table (V)' : 'View mode: drag to move the table (V)'}
-          >
-            <Hand />
-            <KeyHint k="V" />
-          </button>
-          <Reactions engine={engine} busRef={reactBus} hint={<KeyHint k="R" />} />
-          <span className="sep" />
-          <button
-            className={`stats-btn${players ? ' on' : ''}`}
-            onClick={() => setPlayers((s) => !s)}
-            aria-pressed={players}
-            aria-keyshortcuts="P"
-            title={players ? 'Hide players (P)' : 'Show players (P)'}
-          >
-            <Timers roomId={id} me={playerId} initial={data.times} busRef={timeBus} stopped={done} onTimes={onTimes} />
-            <KeyHint k="P" />
-          </button>
-          <span className="sep" />
-          <NoteButton createRef={createNote} hint={<KeyHint k="N" />} />
-          <button
-            className="icon-btn"
-            onClick={() => engine.addRef()}
-            aria-label="Reference image"
-            aria-keyshortcuts="I"
-            title="Add the reference image to the board (I)"
-          >
-            <Picture />
-            <KeyHint k="I" />
-          </button>
         </div>
       )}
       {engine && (
@@ -402,19 +576,14 @@ export default function Room({ id }) {
         />
       )}
       <canvas ref={cursors} className="cursors" />
-      <div className="float tr">
-        <button
-          className="icon-btn"
-          onClick={() => setHelp(true)}
-          aria-label="How to play"
-          aria-keyshortcuts="H"
-          title="How to play (H)"
-        >
-          <HelpIcon />
-          <KeyHint k="H" />
-        </button>
-        <AccountButton />
-        <Settings privateRoom={!!data?.private} />
+      <div className={dock ? 'float dock' : 'bars'}>
+        <div className={dock ? 'bar' : 'float tl'}>{nav}</div>
+        {dock && play && <span className="sep" />}
+        {play && <div className={`play-tools ${dock ? 'bar' : 'float tc'}`}>{play}</div>}
+        {dock && <span className="sep" />}
+        <div className={dock ? 'bar' : 'float br'}>{view}</div>
+        {dock && <span className="sep" />}
+        <div className={dock ? 'bar' : 'float tr'}>{account}</div>
       </div>
       {helpShown && <Help onClose={closeHelp} closing={helpClosing} />}
       {party && <Celebration onDone={endParty} />}
@@ -430,32 +599,6 @@ export default function Room({ id }) {
           onClose={closePodium}
         />
       )}
-      <div className="float br">
-        <button
-          className="icon-btn"
-          onClick={() => engine?.zoomBy(1 / 1.4)}
-          aria-label="Zoom out"
-          aria-keyshortcuts="-"
-          title="Zoom out (-)"
-        >
-          <Minus />
-          <KeyHint k="-" />
-        </button>
-        <button className="icon-btn" onClick={() => engine?.fit()} aria-label="Fit" aria-keyshortcuts="C" title="Fit to screen (C)">
-          <Fit />
-          <KeyHint k="C" />
-        </button>
-        <button
-          className="icon-btn"
-          onClick={() => engine?.zoomBy(1.4)}
-          aria-label="Zoom in"
-          aria-keyshortcuts="+"
-          title="Zoom in (+)"
-        >
-          <Plus />
-          <KeyHint k="+" />
-        </button>
-      </div>
       {engine && (
         <Sidebar engine={engine} roomId={id} groups={groups} notes={notes} refs={refs} open={side} ready={ready} nameOf={nameOf} />
       )}

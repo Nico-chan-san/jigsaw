@@ -3,6 +3,11 @@
 import { createHash } from 'node:crypto'
 
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
+// Every socket is pinged this often (ms), and dropped if nothing, not even the pong, came back in
+// DEAD_MS. A laptop going to sleep or losing its network never closes its sockets, so without this
+// its player would stay in the room for good.
+const PING_MS = 25000
+const DEAD_MS = 70000
 
 function frame(op, payload) {
   const n = payload.length
@@ -27,14 +32,24 @@ class Socket {
     this.open = true
     this.onMessage = onMessage
     this.onClose = onClose
+    this.heard = Date.now()
     sock.setNoDelay(true)
-    sock.on('data', (d) => this.read(d))
+    sock.on('data', (d) => {
+      this.heard = Date.now()
+      this.read(d)
+    })
     sock.on('close', () => this.closed())
     sock.on('error', () => this.closed())
   }
 
   send(text) {
     if (this.open) this.sock.write(frame(1, Buffer.from(text)))
+  }
+
+  ping() {
+    if (!this.open) return
+    if (Date.now() - this.heard > DEAD_MS) return this.closed()
+    this.sock.write(frame(9, Buffer.alloc(0)))
   }
 
   closed() {
@@ -88,6 +103,12 @@ class Socket {
 // Calls onConnect(socket, url) for every upgrade request whose path matches.
 // Other upgrades (such as Vite's HMR socket) are left alone.
 export function attachWebSocket(httpServer, path, onConnect) {
+  const all = new Set()
+  const timer = setInterval(() => {
+    for (const ws of all) ws.ping()
+  }, PING_MS)
+  timer.unref()
+  httpServer.on('close', () => clearInterval(timer))
   httpServer.on('upgrade', (req, sock, head) => {
     const url = new URL(req.url, 'http://x')
     if (url.pathname !== path) return
@@ -103,8 +124,12 @@ export function attachWebSocket(httpServer, path, onConnect) {
     const ws = new Socket(
       sock,
       (text) => ws.handler?.(text),
-      () => ws.onclose?.(),
+      () => {
+        all.delete(ws)
+        ws.onclose?.()
+      },
     )
+    all.add(ws)
     onConnect(ws, url)
     if (head?.length) ws.read(head)
   })

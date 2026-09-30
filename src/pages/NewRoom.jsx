@@ -4,6 +4,7 @@ import { SHAPES, buildPuzzle, gridFor, outlinePath, pile, samplePiecePath, scatt
 import { useApp } from '../App.jsx'
 import { Arrow, Chevron, Upload } from '../components/icons.jsx'
 import InviteList from '../components/Invite.jsx'
+import TextField from '../components/TextField.jsx'
 
 const MIN = 4
 const MAX = 4000
@@ -272,8 +273,7 @@ export default function NewRoom() {
     <section className="create">
       <section className="field">
         <h2 className="label">Title</h2>
-        <input
-          className="text"
+        <TextField
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Title"
@@ -315,8 +315,9 @@ export default function NewRoom() {
           <input ref={input} type="file" accept="image/*" onChange={(e) => pick(e.target.files[0])} />
         </div>
         <form className="row link-row" onSubmit={fromLink}>
-          <input
-            className={`text${linkError ? ' bad' : ''}`}
+          <TextField
+            compact
+            bad={!!linkError}
             type="url"
             value={link}
             onChange={(e) => {

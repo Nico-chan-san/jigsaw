@@ -37,6 +37,13 @@ export const Sun = (p) => (
   </Svg>
 )
 
+export const Dock = (p) => (
+  <Svg {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M8 8h8" />
+  </Svg>
+)
+
 export const Moon = (p) => (
   <Svg {...p}>
     <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" />
@@ -45,7 +52,21 @@ export const Moon = (p) => (
 
 export const Fit = (p) => (
   <Svg {...p}>
+    <circle cx="12" cy="12" r="7" />
+    <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+    <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" />
+  </Svg>
+)
+
+export const Fullscreen = (p) => (
+  <Svg {...p}>
     <path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4" />
+  </Svg>
+)
+
+export const ExitFullscreen = (p) => (
+  <Svg {...p}>
+    <path d="M9 4v4a1 1 0 0 1-1 1H4M20 9h-4a1 1 0 0 1-1-1V4M15 20v-4a1 1 0 0 1 1-1h4M4 15h4a1 1 0 0 1 1 1v4" />
   </Svg>
 )
 
@@ -208,6 +229,13 @@ export const Lock = (p) => (
 export const Logout = (p) => (
   <Svg {...p}>
     <path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M9 16l-4-4 4-4M5 12h10" />
+  </Svg>
+)
+
+export const Changelog = (p) => (
+  <Svg {...p}>
+    <path d="M7 4h7l4 4v11a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" />
+    <path d="M14 4v4h4M9 12h6M9 16h4" />
   </Svg>
 )
 

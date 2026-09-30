@@ -5,7 +5,9 @@ import { api } from '../lib/api.js'
 import { useApp } from '../App.jsx'
 import { useLinger } from '../lib/linger.js'
 import { EmailForm, looksLikePassphrase, Passphrase, PassphraseWarning } from './Account.jsx'
-import { Close, Key, User } from './icons.jsx'
+import { Close, Key, Logout, User } from './icons.jsx'
+import Confirm from './Confirm.jsx'
+import TextField from './TextField.jsx'
 
 const LOCAL = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
 
@@ -21,8 +23,7 @@ function NameField() {
   }
   return (
     <>
-      <input
-        className="text"
+      <TextField
         value={value}
         maxLength={32}
         placeholder="Your name"
@@ -127,17 +128,45 @@ export function AccountButton() {
   )
 }
 
+// Asks before logging out, showing how to log back in. onDone runs either way.
+export function LogoutConfirm({ onDone }) {
+  const { player, logout } = useApp()
+  if (!player) return null
+  return (
+    <Confirm
+      title={`Log out ${player.name}?`}
+      text={
+        player.email
+          ? `You can log back in with ${player.email} and your password.`
+          : 'You can log back in with your passphrase:'
+      }
+      action="Log out"
+      danger
+      onCancel={onDone}
+      onConfirm={() => {
+        logout()
+        onDone()
+      }}
+    >
+      {!player.email && <Passphrase value={player.passphrase} />}
+    </Confirm>
+  )
+}
+
 // Everything about who you are: name, passphrase, and a QR code to carry on on your phone.
 export default function AccountDialog({ onClose, closing }) {
   const { player, requireName, openLogin, switchToEmail } = useApp()
   const [shown, setShown] = useState(false)
   const [switching, setSwitching] = useState(false)
+  const [leaving, setLeaving] = useState(false)
+  const stay = useCallback(() => setLeaving(false), [])
 
   useEffect(() => {
+    if (leaving) return
     const key = (e) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
-  }, [onClose])
+  }, [onClose, leaving])
 
   // Rendered on the body: the settings panel it opens from would otherwise contain it.
   return createPortal(
@@ -212,7 +241,14 @@ export default function AccountDialog({ onClose, closing }) {
             <h2 className="label">Phone</h2>
             <PhoneLink player={player} />
           </section>
+          {player && (
+            <button className="secondary danger" onClick={() => setLeaving(true)}>
+              <Logout />
+              Log out
+            </button>
+          )}
         </div>
+        {leaving && <LogoutConfirm onDone={stay} />}
       </div>
     </div>,
     document.body,

@@ -102,6 +102,14 @@ export default function App() {
   const [dialog, setDialog] = useState(null)
   const [shownDialog, dialogClosing] = useLinger(dialog)
   const [theme, toggleTheme] = useTheme()
+  // All the room's buttons in one bar at the top middle, instead of in the corners.
+  const [dock, setDockState] = useState(() => store.get('dock') === '1')
+  const toggleDock = useCallback(() => {
+    setDockState((d) => {
+      store.set('dock', d ? '0' : '1')
+      return !d
+    })
+  }, [])
   const [player, setPlayerState] = useState(readPlayer)
   const playerRef = useRef(player)
   const [prompt, setPrompt] = useState(null)
@@ -209,6 +217,8 @@ export default function App() {
   const ctx = {
     theme,
     toggleTheme,
+    dock,
+    toggleDock,
     player,
     playerId: player?.id || null,
     // The player right now, for code that runs after an await (state in a closure may be stale).

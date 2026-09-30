@@ -133,6 +133,49 @@ button {
   right: 16px;
 }
 
+/* ---- top toolbar (setting) ---- */
+
+/* Without it, the groups are separate toolbars in the corners and the wrapper takes no space. */
+.bars {
+  display: contents;
+}
+/* With it, every group sits in one bar at the top middle, between separators. */
+.float.dock {
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  width: fit-content;
+  max-width: calc(100% - 32px);
+  margin: 0 auto;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+}
+.float.dock .bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+/* In fullscreen on a MacBook with a notch, the bar goes below it (see Room.jsx). */
+.room.notch .float.dock {
+  top: calc(8px + var(--notch));
+}
+.room.notch.docked .side,
+.room.notch.docked .players {
+  top: calc(60px + var(--notch));
+}
+
+/* After a few seconds without the pointer or keyboard (see Room.jsx), the controls fade away. */
+.room .float,
+.room .podium-btn {
+  transition: opacity 0.2s ease;
+}
+.room.idle .float,
+.room.idle .podium-btn {
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* ---- name prompt ---- */
 
 .modal-bg {
@@ -201,6 +244,13 @@ button {
 
 /* ---- jigsaw list and new jigsaw dialogs ---- */
 
+/* The table behind is blurred rather than greyed out. */
+.modal-bg.sheet-bg {
+  background: none;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
 .modal.sheet {
   width: min(1080px, 100%);
   height: calc(100dvh - 32px);
@@ -232,12 +282,6 @@ button {
 .sheet .create {
   margin-top: 0;
   padding-bottom: 0;
-}
-/* Roomier text fields, like the name field in the account dialog. */
-.create .field > .text {
-  flex: none;
-  height: 48px;
-  padding: 0 16px;
 }
 .rooms-section + .rooms-section {
   margin-top: 40px;
@@ -342,7 +386,6 @@ button {
 .create-media {
   gap: 8px;
 }
-.link-row .text,
 .link-row .secondary {
   height: 38px;
   font-size: 14px;
@@ -372,11 +415,12 @@ button {
   width: 100%;
 }
 
+/* Text fields (see TextField.jsx). They fill the width of a row, but keep their height in a column. */
 .text {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
-  height: 44px;
-  padding: 0 14px;
+  height: 48px;
+  padding: 0 16px;
   border: 1px solid var(--line);
   border-radius: 10px;
   outline: 0;
@@ -394,6 +438,16 @@ button {
 }
 .text::placeholder {
   color: var(--muted);
+}
+/* A button next to a text field matches its height. */
+.row > .text:not(.compact) ~ .primary,
+.row > .text:not(.compact) ~ .secondary {
+  height: 48px;
+}
+.text.compact {
+  height: 38px;
+  padding: 0 14px;
+  font-size: 14px;
 }
 .text.bad,
 .text.bad:focus {
@@ -1035,12 +1089,17 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   color: var(--muted);
 }
 .sep {
+  align-self: center;
   width: 1px;
   height: 20px;
   margin: 0 4px;
   background: var(--line);
 }
-.float.tc .icon-btn {
+/* In fullscreen on a MacBook with a notch, the top middle toolbar goes below it (see Room.jsx). */
+.room.notch .float.tc {
+  top: calc(8px + var(--notch));
+}
+.play-tools .icon-btn {
   cursor: grab;
   touch-action: none;
 }
@@ -1077,7 +1136,7 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   position: relative;
   display: inline-flex;
 }
-.float.tc .react-pick .icon-btn {
+.play-tools .react-pick .icon-btn {
   cursor: pointer;
   touch-action: manipulation;
 }
@@ -1415,6 +1474,50 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   align-items: center;
   justify-content: space-between;
 }
+/* ---- changelog ---- */
+
+.modal.changelog {
+  width: min(560px, 100%);
+  max-height: calc(100dvh - 32px);
+  gap: 16px;
+  padding: 20px 20px 20px 24px;
+}
+.changelog-body {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  margin-right: -8px;
+  padding: 0 8px 4px 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  line-height: 1.5;
+}
+.changelog-body section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.changelog-body p,
+.changelog-body ul {
+  margin: 0;
+}
+.changelog-body ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 18px;
+}
+.changelog-body code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--hover);
+  font-size: 0.92em;
+}
+.changelog-body a {
+  color: inherit;
+}
+
 /* Two columns: mouse and touch on the left, the longer keyboard list on the right. */
 .help-body {
   min-height: 0;
@@ -1666,11 +1769,6 @@ button.link:hover {
 .account-body .modal-error {
   margin: 0;
 }
-.account-body .text {
-  flex: none;
-  height: 48px;
-  padding: 0 16px;
-}
 .account-body .secondary svg {
   width: 16px;
   height: 16px;
@@ -1708,6 +1806,12 @@ button.link:hover {
 .settings-row.danger svg {
   color: var(--danger);
 }
+.secondary.danger {
+  color: var(--danger);
+}
+.secondary.danger:hover:not(:disabled) {
+  border-color: var(--danger);
+}
 .primary.danger {
   border-color: var(--danger);
   background: var(--danger);
@@ -1718,7 +1822,7 @@ button.link:hover {
 .room.pan-mode .note {
   pointer-events: none;
 }
-.float.tc .view-btn {
+.play-tools .view-btn {
   cursor: pointer;
   touch-action: manipulation;
 }
