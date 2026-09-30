@@ -1,5 +1,5 @@
 // Imperative canvas engine: rendering, camera, dragging, rotation and snapping.
-import { buildPuzzle, outlinePath } from './geometry.js'
+import { buildPuzzle, outlinePath, pack, packExtent } from './geometry.js'
 
 const Q = Math.PI / 2
 const COS = [1, 0, -1, 0]
@@ -19,6 +19,8 @@ const CLICK_PX = 5
 const CLICK_MS = 400
 // Largest side of the cached sprite for a lifted selection.
 const LIFT_MAX = 3000
+// Above this many pieces a selection outline is built from piece silhouettes instead of stroked paths.
+const OUTLINE_PATHS = 120
 // Screen-space size of reference image handles.
 const HANDLE = 7
 const DEL_R = 11
@@ -52,7 +54,15 @@ export class Engine {
     this.lctx = this.layer.getContext('2d')
     this.hlLayer = document.createElement('canvas')
     this.hlCtx = this.hlLayer.getContext('2d')
+    // The selection outline, cached apart from the scene so changing the selection doesn't redraw the table.
+    this.selLayer = document.createElement('canvas')
+    this.selCtx = this.selLayer.getContext('2d')
+    this.selKey = ''
+    this.selVer = 0
     this.hitCtx = document.createElement('canvas').getContext('2d')
+    // Silhouettes of the pieces being outlined, see outlineMasks().
+    this.maskLayer = document.createElement('canvas')
+    this.maskCtx = this.maskLayer.getContext('2d')
     // Other players' cursors go on a separate canvas stacked above the notes.
     this.overlay = overlay
     this.octx = overlay?.getContext('2d')
@@ -95,6 +105,8 @@ export class Engine {
     // Face down pieces (hardcore mode), their back sprites, and flips in progress: i -> start time.
     this.f = new Uint8Array(n)
     this.backs = new Array(n)
+    // Plain filled outlines of the pieces, made the first time a piece is outlined.
+    this.masks = new Array(n)
     this.flips = new Map()
     // Pieces turned in place on the table, still animating: i -> { cx, cy, a } (a in radians, decays to 0).
     this.turns = new Map()
@@ -268,7 +280,7 @@ export class Engine {
     this.dpr = window.devicePixelRatio || 1
     this.vw = Math.max(1, rect.width)
     this.vh = Math.max(1, rect.height)
-    for (const c of [this.canvas, this.layer, this.hlLayer, this.scene, this.overlay]) {
+    for (const c of [this.canvas, this.layer, this.hlLayer, this.selLayer, this.maskLayer, this.scene, this.overlay]) {
       if (!c) continue
       c.width = Math.round(this.vw * this.dpr)
       c.height = Math.round(this.vh * this.dpr)
@@ -482,12 +494,15 @@ export class Engine {
   }
 
   setSelection(set, refs = new Set(), notes = new Set()) {
+    const same = (a, b) => a.size === b.size && [...a].every((v) => b.has(v))
     this.sel = set
+    this.selVer++
+    // Selected images are outlined in the scene; pieces have their own layer.
+    const sameRefs = same(refs, this.selRefs)
     this.selRefs = refs
-    const same = notes.size === this.selNotes.size && [...notes].every((id) => this.selNotes.has(id))
+    if (!same(notes, this.selNotes)) this.notes?.select(notes)
     this.selNotes = notes
-    if (!same) this.notes?.select(notes)
-    this.invalidate()
+    this.invalidate(!sameRefs)
   }
 
   get selCount() {
@@ -644,6 +659,20 @@ export class Engine {
     ctx.lineWidth = 1 / sc
     ctx.strokeStyle = 'rgba(0,0,0,0.35)'
     ctx.stroke(path)
+    return c
+  }
+
+  // The piece's shape filled solid, with no shadow, at the same size as its sprite.
+  makeMask(i) {
+    const { w, h } = this.geo
+    const m = this.margin
+    const sc = this.spriteScale
+    const c = document.createElement('canvas')
+    c.width = Math.ceil((w + 2 * m) * sc)
+    c.height = Math.ceil((h + 2 * m) * sc)
+    const ctx = c.getContext('2d')
+    ctx.setTransform(sc, 0, 0, sc, c.width / 2, c.height / 2)
+    ctx.fill(this.paths[i])
     return c
   }
 
@@ -901,6 +930,9 @@ export class Engine {
     for (const r of this.refs) if (inside(r.x, r.y)) refs.add(r.id)
     const notes = new Set(m.baseNotes)
     for (const n of this.notes?.get() || []) if (inside(n.x + n.w / 2, n.y + n.h / 2)) notes.add(n.id)
+    // Most moves change nothing but the box itself, which is cheap to draw.
+    const same = (a, b) => a.size === b.size && [...a].every((v) => b.has(v))
+    if (same(next, this.sel) && same(refs, this.selRefs) && same(notes, this.selNotes)) return this.invalidate(false)
     this.setSelection(next, refs, notes)
   }
 
@@ -1154,49 +1186,8 @@ export class Engine {
     this.invalidate(false)
   }
 
-  // Room around a module when laying modules out side by side: enough that tabs don't overlap
-  // and neighbours stay out of snapping range of each other.
   get packExtent() {
-    return Math.max(this.geo.w, this.geo.h) / 2 + this.geo.pad * 0.7
-  }
-
-  // Lays boxes ({ x0, y0, x1, y1 }) out in a square grid centred on 0, in reading order of where
-  // they lie now. Every column is as wide as its widest box and every row as tall as its tallest.
-  // Returns the new centre of each box.
-  pack(boxes) {
-    const S = this.geo.S
-    const gap = S * 0.12
-    const mid = (b) => [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2]
-    const order = boxes
-      .map((b, k) => ({ k, x: mid(b)[0], row: Math.round(mid(b)[1] / (S * 1.5)) }))
-      .sort((a, b) => a.row - b.row || a.x - b.x)
-      .map((o) => o.k)
-    const cols = Math.ceil(Math.sqrt(boxes.length))
-    const rows = Math.ceil(boxes.length / cols)
-    const cw = new Array(cols).fill(0)
-    const rh = new Array(rows).fill(0)
-    order.forEach((k, n) => {
-      const b = boxes[k]
-      cw[n % cols] = Math.max(cw[n % cols], b.x1 - b.x0)
-      rh[(n / cols) | 0] = Math.max(rh[(n / cols) | 0], b.y1 - b.y0)
-    })
-    const starts = (sizes) => {
-      let at = -(sizes.reduce((a, b) => a + b, 0) + gap * (sizes.length - 1)) / 2
-      return sizes.map((v) => {
-        const s = at
-        at += v + gap
-        return s
-      })
-    }
-    const xs = starts(cw)
-    const ys = starts(rh)
-    const out = new Array(boxes.length)
-    order.forEach((k, n) => {
-      const c = n % cols
-      const r = (n / cols) | 0
-      out[k] = [xs[c] + cw[c] / 2, ys[r] + rh[r] / 2]
-    })
-    return out
+    return packExtent(this.geo)
   }
 
   // G while holding several groups: pulls them together in a grid around the pointer, none overlapping.
@@ -1217,7 +1208,7 @@ export class Engine {
       }
       return b
     })
-    const spots = this.pack(boxes)
+    const spots = pack(boxes, this.geo.S)
     mods.forEach((js, m) => {
       const b = boxes[m]
       const dx = spots[m][0] - (b.x0 + b.x1) / 2
@@ -1288,7 +1279,7 @@ export class Engine {
     const cx = (all.x0 + all.x1) / 2
     const cy = (all.y0 + all.y1) / 2
     const boxes = mods.map((m) => this.bbox(m, this.packExtent))
-    const spots = this.pack(boxes)
+    const spots = pack(boxes, this.geo.S)
     const x0 = this.x.slice()
     const y0 = this.y.slice()
     mods.forEach((m, k) => {
@@ -1384,13 +1375,7 @@ export class Engine {
 
     // Each carried group snaps on its own, so unrelated groups in a selection never merge by accident.
     const changed = new Set()
-    const seen = new Set()
-    for (const i of d.ids) {
-      if (seen.has(i)) continue
-      const grp = this.members(this.g[i]).filter((j) => d.set.has(j))
-      for (const j of grp) seen.add(j)
-      for (const j of this.snap(grp)) changed.add(j)
-    }
+    for (const grp of this.modules(d.ids)) for (const j of this.snap(grp)) changed.add(j)
 
     // The lift sprite can keep animating the landing if everything moved by the same snap offset.
     const l = this.lift
@@ -1861,7 +1846,10 @@ export class Engine {
       l.value += (l.target - l.value) * ease(dt, l.target ? 55 : 70)
       if (Math.abs(l.target - l.value) < 0.005) {
         l.value = l.target
-        if (!l.target) this.lift = null
+        if (!l.target) {
+          this.lift = null
+          this.sceneVer++
+        }
       } else again = true
     }
 
@@ -1928,8 +1916,9 @@ export class Engine {
     const [wx1, wy1] = this.toWorld(vw, vh)
     const view = { wx0, wy0, wx1, wy1 }
 
-    // While something is lifted, the rest of the table is cached and only redrawn when it changes.
-    if (this.lift && this.built === this.n) {
+    // Everything but the lifted pieces is cached and only redrawn when it changes, so drags, the
+    // selection box and other players' cursors don't redraw the whole table every frame.
+    if (this.built === this.n) {
       const key = `${vk}:${this.sceneVer}`
       if (key !== this.sceneKey) {
         this.drawScene(this.sctx, view)
@@ -1941,12 +1930,26 @@ export class Engine {
       this.sceneKey = ''
       this.drawScene(ctx, view)
     }
-    if (this.lift) this.drawLift(view)
-    // Pieces still landing after a drop get their selection outline right away, on top.
-    if (this.lift && !this.drag && this.sel.size) {
-      const ids = [...this.sel].filter((i) => this.lift.set.has(i))
-      if (ids.length) this.drawOutline(ctx, ids, this.colors.sel)
+    // The selection outline goes under pieces being carried, and over pieces still landing after a
+    // drop so they get it right away. It is only redrawn when the view, pieces or selection change.
+    let outlined = false
+    if (this.sel.size) {
+      const key = `${vk}:${this.sceneVer}:${this.selVer}:${this.drag ? 1 : 0}`
+      if (key !== this.selKey) {
+        this.selKey = key
+        const lifted = this.drag && this.lift?.set
+        const ids = lifted ? [...this.sel].filter((i) => !lifted.has(i)) : this.sel
+        this.selDrawn = this.drawOutline(null, ids, this.colors.sel, this.selLayer, this.selCtx)
+      }
+      outlined = this.selDrawn
+    } else this.selKey = ''
+    const blitSel = () => {
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.drawImage(this.selLayer, 0, 0)
     }
+    if (outlined && this.drag) blitSel()
+    if (this.lift) this.drawLift(view)
+    if (outlined && !this.drag) blitSel()
     this.drawChrome()
   }
 
@@ -1996,10 +1999,6 @@ export class Engine {
     }
 
     if (this.hl && !this.drag) this.drawOutline(ctx, this.hl.ids, this.colors.line || '#000')
-    if (this.sel.size) {
-      const ids = lifted ? [...this.sel].filter((i) => !lifted.has(i)) : [...this.sel]
-      if (ids.length) this.drawOutline(ctx, ids, this.colors.sel)
-    }
   }
 
   // Draws the lifted pieces with a drop shadow. The shadow is blurred at a third of the
@@ -2227,11 +2226,62 @@ export class Engine {
   }
 
   // Outline around the union of the given pieces (no inner seams): stroke every
-  // outline, then punch the piece shapes back out.
-  drawOutline(target, ids, color) {
+  // outline, then punch the piece shapes back out. Only pieces on the edge of the union are
+  // stroked, and only those and their neighbours punched, so a big module costs about its rim.
+  // Draws into layer (hlLayer by default) and then onto target, if given. Returns whether anything
+  // was in view.
+  drawOutline(target, ids, color, layer = this.hlLayer, c = this.hlCtx) {
     const { cam, dpr, vw, vh } = this
-    const c = this.hlCtx
     const z = cam.z * dpr
+    const { cols, rows } = this.room
+    const set = ids instanceof Set ? ids : new Set(ids)
+    // A grid neighbour in the same group and the same set lies exactly against the piece.
+    const inner = (i) => {
+      const col = i % cols
+      const row = (i / cols) | 0
+      const g = this.g[i]
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          if (!dr && !dc) continue
+          const cc = col + dc
+          const rr = row + dr
+          if (cc < 0 || rr < 0 || cc >= cols || rr >= rows) return false
+          const j = rr * cols + cc
+          if (this.g[j] !== g || !set.has(j)) return false
+        }
+      }
+      return true
+    }
+    const [wx0, wy0] = this.toWorld(0, 0)
+    const [wx1, wy1] = this.toWorld(vw, vh)
+    const R = this.radius + (5 * dpr) / z
+    const edge = []
+    const rim = new Set()
+    for (const i of set) {
+      const [x, y] = this.turns.has(i) ? this.pose(i) : [this.x[i], this.y[i]]
+      if (x + R < wx0 || x - R > wx1 || y + R < wy0 || y - R > wy1) continue
+      if (inner(i)) continue
+      edge.push(i)
+      rim.add(i)
+    }
+    // Strokes reach into the neighbours of edge pieces, so those get punched too (after the edge pieces).
+    const punch = edge.slice()
+    for (const i of edge) {
+      const col = i % cols
+      const row = (i / cols) | 0
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          const cc = col + dc
+          const rr = row + dr
+          if (cc < 0 || rr < 0 || cc >= cols || rr >= rows) continue
+          const j = rr * cols + cc
+          if (!rim.has(j) && set.has(j) && this.g[j] === this.g[i]) {
+            rim.add(j)
+            punch.push(j)
+          }
+        }
+      }
+    }
     const place = (i) => {
       const [x, y, a] = this.pose(i)
       const co = Math.cos(a) * z
@@ -2240,24 +2290,94 @@ export class Engine {
       c.setTransform(co * sx, sn * sx, -sn, co, ((x - cam.x) * cam.z + vw / 2) * dpr, ((y - cam.y) * cam.z + vh / 2) * dpr)
     }
     c.setTransform(1, 0, 0, 1, 0, 0)
-    c.clearRect(0, 0, this.hlLayer.width, this.hlLayer.height)
-    c.lineJoin = 'round'
-    c.strokeStyle = color
-    c.lineWidth = (5 * dpr) / z
-    for (const i of ids) {
-      place(i)
-      c.stroke(this.paths[i])
+    c.clearRect(0, 0, layer.width, layer.height)
+    if (!edge.length) return false
+    if (punch.length > OUTLINE_PATHS) this.outlineMasks(c, edge, punch, color)
+    else {
+      c.lineJoin = 'round'
+      c.strokeStyle = color
+      c.lineWidth = (5 * dpr) / z
+      for (const i of edge) {
+        place(i)
+        c.stroke(this.paths[i])
+      }
+      c.globalCompositeOperation = 'destination-out'
+      c.lineWidth = (1.5 * dpr) / z
+      for (const i of punch) {
+        place(i)
+        c.fill(this.paths[i])
+        c.stroke(this.paths[i])
+      }
+      c.globalCompositeOperation = 'source-over'
     }
+    if (target) {
+      target.setTransform(1, 0, 0, 1, 0, 0)
+      target.drawImage(layer, 0, 0)
+    }
+    return true
+  }
+
+  // The same outline as the stroked one, for many pieces at once: draws the edge pieces'
+  // silhouettes (one image each, as cheap as drawing the pieces), grows that by the outline width
+  // by stamping it around a circle, colours it, and cuts the silhouettes of the edge pieces and
+  // their neighbours back out. Past the silhouettes the cost doesn't depend on how many pieces there are.
+  outlineMasks(c, edge, punch, color) {
+    const { cam, dpr, vw, vh } = this
+    const z = cam.z * dpr
+    const sc = this.spriteScale
+    const M = this.maskLayer
+    const mc = this.maskCtx
+    const W = M.width
+    const H = M.height
+    mc.setTransform(1, 0, 0, 1, 0, 0)
+    mc.clearRect(0, 0, W, H)
+    const e = this.radius * z
+    let bx0 = Infinity
+    let by0 = Infinity
+    let bx1 = -Infinity
+    let by1 = -Infinity
+    const silhouette = (i) => {
+      const [x, y, a] = this.pose(i)
+      const X = ((x - cam.x) * cam.z + vw / 2) * dpr
+      const Y = ((y - cam.y) * cam.z + vh / 2) * dpr
+      bx0 = Math.min(bx0, X - e)
+      by0 = Math.min(by0, Y - e)
+      bx1 = Math.max(bx1, X + e)
+      by1 = Math.max(by1, Y + e)
+      const mk = (this.masks[i] ??= this.makeMask(i))
+      const co = Math.cos(a) * z
+      const sn = Math.sin(a) * z
+      const fx = this.f[i] ? -1 : 1
+      mc.setTransform(co * fx, sn * fx, -sn, co, X, Y)
+      const w = mk.width / sc
+      const h = mk.height / sc
+      mc.drawImage(mk, -w / 2, -h / 2, w, h)
+    }
+    for (const i of edge) silhouette(i)
+    // Outer edge of the ring (half the stroke width) and inner edge (half the seam stroke).
+    const r = 2.5 * dpr
+    const q = 0.75 * dpr
+    const pad = Math.ceil(r) + 2
+    const x0 = Math.max(0, Math.floor(bx0) - pad)
+    const y0 = Math.max(0, Math.floor(by0) - pad)
+    const x1 = Math.min(W, Math.ceil(bx1) + pad)
+    const y1 = Math.min(H, Math.ceil(by1) + pad)
+    if (x1 <= x0 || y1 <= y0) return
+    const bw = x1 - x0
+    const bh = y1 - y0
+    c.setTransform(1, 0, 0, 1, 0, 0)
+    const stamp = (dx, dy) => c.drawImage(M, x0, y0, bw, bh, x0 + dx, y0 + dy, bw, bh)
+    for (let k = 0; k < 12; k++) stamp(Math.cos((k * Math.PI) / 6) * r, Math.sin((k * Math.PI) / 6) * r)
+    c.globalCompositeOperation = 'source-in'
+    c.fillStyle = color
+    c.fillRect(x0 - pad, y0 - pad, bw + 2 * pad, bh + 2 * pad)
+    // Punch holds the edge pieces first, so this adds just their neighbours.
+    for (let k = edge.length; k < punch.length; k++) silhouette(punch[k])
+    // Cutting out a slightly grown silhouette also clears the faint seams between pieces.
     c.globalCompositeOperation = 'destination-out'
-    c.lineWidth = (1.5 * dpr) / z
-    for (const i of ids) {
-      place(i)
-      c.fill(this.paths[i])
-      c.stroke(this.paths[i])
-    }
+    stamp(0, 0)
+    for (let k = 0; k < 8; k++) stamp(Math.cos((k * Math.PI) / 4) * q, Math.sin((k * Math.PI) / 4) * q)
     c.globalCompositeOperation = 'source-over'
-    target.setTransform(1, 0, 0, 1, 0, 0)
-    target.drawImage(this.hlLayer, 0, 0)
   }
 
   drawPiece(ctx, i, x, y, a, s, sc) {

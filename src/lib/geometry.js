@@ -200,33 +200,71 @@ export function outlinePath(outline) {
   return p
 }
 
-// Spreads pieces out in a loose grid of slots so none overlap, each with a
-// random quarter-turn rotation.
-export function scatter({ cols, rows, width, height, seed }) {
-  const n = cols * rows
-  const w = width / cols
-  const h = height / rows
-  const S = Math.min(w, h)
-  const r = rng(seed ^ 0x9e3779b9)
-  const slot = Math.max(w, h) + 2 * S * TAB_REACH + S * 0.35
-  const sc = Math.ceil(Math.sqrt(n * 1.6))
-  const sr = Math.ceil(n / sc)
-  const slots = Array.from({ length: sc * sr }, (_, k) => k)
-  for (let k = slots.length - 1; k > 0; k--) {
-    const m = Math.floor(r() * (k + 1))
-    ;[slots[k], slots[m]] = [slots[m], slots[k]]
-  }
-  const jit = S * 0.15
-  return Array.from({ length: n }, (_, i) => {
-    const s = slots[i]
-    return {
-      i,
-      x: ((s % sc) - (sc - 1) / 2) * slot + (r() * 2 - 1) * jit,
-      y: (Math.floor(s / sc) - (sr - 1) / 2) * slot + (r() * 2 - 1) * jit,
-      r: Math.floor(r() * 4),
-      g: i,
-    }
+// Room around a module when laying modules out side by side: enough that tabs don't overlap
+// and neighbours stay out of snapping range of each other.
+export function packExtent({ w, h, pad }) {
+  return Math.max(w, h) / 2 + pad * 0.7
+}
+
+// Lays boxes ({ x0, y0, x1, y1 }) out in a square grid centred on 0, in reading order of where
+// they lie now. Every column is as wide as its widest box and every row as tall as its tallest.
+// Returns the new centre of each box. S is the puzzle's piece size (see buildPuzzle).
+export function pack(boxes, S) {
+  const gap = S * 0.12
+  const mid = (b) => [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2]
+  const order = boxes
+    .map((b, k) => ({ k, x: mid(b)[0], row: Math.round(mid(b)[1] / (S * 1.5)) }))
+    .sort((a, b) => a.row - b.row || a.x - b.x)
+    .map((o) => o.k)
+  const cols = Math.ceil(Math.sqrt(boxes.length))
+  const rows = Math.ceil(boxes.length / cols)
+  const cw = new Array(cols).fill(0)
+  const rh = new Array(rows).fill(0)
+  order.forEach((k, n) => {
+    const b = boxes[k]
+    cw[n % cols] = Math.max(cw[n % cols], b.x1 - b.x0)
+    rh[(n / cols) | 0] = Math.max(rh[(n / cols) | 0], b.y1 - b.y0)
   })
+  const starts = (sizes) => {
+    let at = -(sizes.reduce((a, b) => a + b, 0) + gap * (sizes.length - 1)) / 2
+    return sizes.map((v) => {
+      const s = at
+      at += v + gap
+      return s
+    })
+  }
+  const xs = starts(cw)
+  const ys = starts(rh)
+  const out = new Array(boxes.length)
+  order.forEach((k, n) => {
+    const c = n % cols
+    const r = (n / cols) | 0
+    out[k] = [xs[c] + cw[c] / 2, ys[r] + rh[r] / 2]
+  })
+  return out
+}
+
+// Lays the pieces out in shuffled order in the same tight grid as sorting a selection (G) does,
+// each with a random quarter-turn rotation.
+export function scatter(room) {
+  const n = room.cols * room.rows
+  const geo = { w: room.width / room.cols, h: room.height / room.rows }
+  geo.S = Math.min(geo.w, geo.h)
+  geo.pad = geo.S * TAB_REACH
+  const r = rng(room.seed ^ 0x9e3779b9)
+  const order = Array.from({ length: n }, (_, k) => k)
+  for (let k = n - 1; k > 0; k--) {
+    const m = Math.floor(r() * (k + 1))
+    ;[order[k], order[m]] = [order[m], order[k]]
+  }
+  // Every piece gets the same box, in a single row so pack keeps the shuffled order.
+  const e = packExtent(geo)
+  const spots = pack(order.map((_, k) => ({ x0: k * 2 * e, y0: -e, x1: k * 2 * e + 2 * e, y1: e })), geo.S)
+  const out = new Array(n)
+  order.forEach((i, k) => {
+    out[i] = { i, x: spots[k][0], y: spots[k][1], r: Math.floor(r() * 4), g: i }
+  })
+  return out
 }
 
 // Tips every piece out in one overlapping heap in the middle, like emptying the box onto

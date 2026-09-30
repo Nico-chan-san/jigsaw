@@ -126,11 +126,6 @@ button {
   top: 16px;
   left: 16px;
 }
-/* Sits to the right of the back button (16px + its 44px panel + an 8px gap). */
-.float.tl2 {
-  top: 16px;
-  left: 68px;
-}
 .float.tr {
   top: 16px;
   right: 16px;

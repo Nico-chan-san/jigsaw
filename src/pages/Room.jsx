@@ -329,8 +329,6 @@ export default function Room({ id }) {
         <button className="icon-btn" onClick={() => setDialog('rooms')} aria-label="All jigsaws" title="All jigsaws">
           <Rooms />
         </button>
-      </div>
-      <div className="float tl2">
         <button
           className={`icon-btn${side ? ' on' : ''}`}
           onClick={() => setSide((s) => !s)}
