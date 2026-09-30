@@ -170,8 +170,16 @@ button {
 .room .podium-btn {
   transition: opacity 0.2s ease;
 }
+.room .side,
+.room .players {
+  transition:
+    transform 0.22s ease,
+    opacity 0.2s ease;
+}
 .room.idle .float,
-.room.idle .podium-btn {
+.room.idle .podium-btn,
+.room.idle .side,
+.room.idle .players {
   opacity: 0;
   pointer-events: none;
 }
