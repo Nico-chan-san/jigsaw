@@ -6,6 +6,8 @@ import { AccountButton } from './components/AccountDialog.jsx'
 import AccountPrompt from './components/Account.jsx'
 import { api } from './lib/api.js'
 import { useLinger } from './lib/linger.js'
+import { useNotch } from './lib/fullscreen.js'
+import { setSound } from './lib/sound.js'
 
 const store = {
   get: (k) => {
@@ -102,12 +104,18 @@ export default function App() {
   const [dialog, setDialog] = useState(null)
   const [shownDialog, dialogClosing] = useLinger(dialog)
   const [theme, toggleTheme] = useTheme()
-  // All the room's buttons in one bar at the top middle, instead of in the corners.
-  const [dock, setDockState] = useState(() => store.get('dock') === '1')
-  const toggleDock = useCallback(() => {
-    setDockState((d) => {
-      store.set('dock', d ? '0' : '1')
-      return !d
+  // Windows over the board keep below a MacBook's notch in fullscreen, like the room's toolbars.
+  const notch = useNotch()
+  useEffect(() => {
+    document.documentElement.style.setProperty('--notch', `${notch}px`)
+  }, [notch])
+  // Sound effects, such as the click when pieces connect. On unless turned off.
+  const [sound, setSoundState] = useState(() => store.get('sound') !== '0')
+  setSound(sound)
+  const toggleSound = useCallback(() => {
+    setSoundState((v) => {
+      store.set('sound', v ? '0' : null)
+      return !v
     })
   }, [])
   const [player, setPlayerState] = useState(readPlayer)
@@ -217,8 +225,8 @@ export default function App() {
   const ctx = {
     theme,
     toggleTheme,
-    dock,
-    toggleDock,
+    sound,
+    toggleSound,
     player,
     playerId: player?.id || null,
     // The player right now, for code that runs after an await (state in a closure may be stale).

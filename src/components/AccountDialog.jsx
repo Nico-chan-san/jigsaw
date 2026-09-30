@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { createPortal } from 'react-dom'
 import qrcode from 'qrcode-generator'
 import { api } from '../lib/api.js'
 import { useApp } from '../App.jsx'
 import { useLinger } from '../lib/linger.js'
 import { EmailForm, looksLikePassphrase, Passphrase, PassphraseWarning } from './Account.jsx'
-import { Close, Key, Logout, User } from './icons.jsx'
+import { Key, Logout, User } from './icons.jsx'
+import Dialog from './Dialog.jsx'
 import Confirm from './Confirm.jsx'
 import TextField from './TextField.jsx'
 
@@ -161,96 +161,77 @@ export default function AccountDialog({ onClose, closing }) {
   const [leaving, setLeaving] = useState(false)
   const stay = useCallback(() => setLeaving(false), [])
 
-  useEffect(() => {
-    if (leaving) return
-    const key = (e) => e.key === 'Escape' && onClose()
-    window.addEventListener('keydown', key)
-    return () => window.removeEventListener('keydown', key)
-  }, [onClose, leaving])
-
-  // Rendered on the body: the settings panel it opens from would otherwise contain it.
-  return createPortal(
-    <div className={`modal-bg${closing ? ' closing' : ''}`} onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal account" role="dialog" aria-label="Account">
-        <div className="help-head">
-          <h1>Account</h1>
-          <button className="icon-btn" onClick={onClose} aria-label="Close" title="Close">
-            <Close />
-          </button>
-        </div>
-        <div className="account-body">
-          {player ? (
-            <>
-              <section className="field">
-                <h2 className="label">Name</h2>
-                <NameField />
-              </section>
-              {player.email ? (
-                <section className="field">
-                  <h2 className="label">Login</h2>
-                  <p className="account-email">{player.email}</p>
-                  <p className="modal-note">You log in with this email and your password.</p>
-                </section>
-              ) : switching ? (
-                <section className="field">
-                  <h2 className="label">Email and password</h2>
-                  <p className="modal-note">
-                    Log in with these instead of your passphrase. Your passphrase stops working, on every device.
-                  </p>
-                  <EmailForm action="Switch to email" create onSubmit={switchToEmail} />
-                  <button type="button" className="link" onClick={() => setSwitching(false)}>
-                    Keep my passphrase
-                  </button>
-                </section>
-              ) : (
-                <section className="field">
-                  <h2 className="label">Passphrase</h2>
-                  {shown ? (
-                    <>
-                      <Passphrase value={player.passphrase} />
-                      <p className="modal-note">Your login. Use it to play as yourself on another device.</p>
-                    </>
-                  ) : (
-                    <button className="secondary" onClick={() => setShown(true)}>
-                      <Key />
-                      Show passphrase
-                    </button>
-                  )}
-                  <button type="button" className="link" onClick={() => setSwitching(true)}>
-                    Switch to email and password
-                  </button>
-                </section>
-              )}
-            </>
+  return (
+    <Dialog title="Account" className="account" bodyClass="account-body" onClose={onClose} closing={closing}>
+      {player ? (
+        <>
+          <section className="field">
+            <h2 className="label">Name</h2>
+            <NameField />
+          </section>
+          {player.email ? (
+            <section className="field">
+              <h2 className="label">Login</h2>
+              <p className="account-email">{player.email}</p>
+              <p className="modal-note">You log in with this email and your password.</p>
+            </section>
+          ) : switching ? (
+            <section className="field">
+              <h2 className="label">Email and password</h2>
+              <p className="modal-note">
+                Log in with these instead of your passphrase. Your passphrase stops working, on every device.
+              </p>
+              <EmailForm action="Switch to email" create onSubmit={switchToEmail} />
+              <button type="button" className="link" onClick={() => setSwitching(false)}>
+                Keep my passphrase
+              </button>
+            </section>
           ) : (
             <section className="field">
-              <h2 className="label">Not logged in</h2>
-              <div className="row">
-                <button className="secondary" onClick={() => (onClose(), requireName())}>
-                  <User />
-                  Pick a name
-                </button>
-                <button className="secondary" onClick={() => (onClose(), openLogin())}>
+              <h2 className="label">Passphrase</h2>
+              {shown ? (
+                <>
+                  <Passphrase value={player.passphrase} />
+                  <p className="modal-note">Your login. Use it to play as yourself on another device.</p>
+                </>
+              ) : (
+                <button className="secondary" onClick={() => setShown(true)}>
                   <Key />
-                  Log in
+                  Show passphrase
                 </button>
-              </div>
+              )}
+              <button type="button" className="link" onClick={() => setSwitching(true)}>
+                Switch to email and password
+              </button>
             </section>
           )}
-          <section className="field">
-            <h2 className="label">Phone</h2>
-            <PhoneLink player={player} />
-          </section>
-          {player && (
-            <button className="secondary danger" onClick={() => setLeaving(true)}>
-              <Logout />
-              Log out
+        </>
+      ) : (
+        <section className="field">
+          <h2 className="label">Not logged in</h2>
+          <div className="row">
+            <button className="secondary" onClick={() => (onClose(), requireName())}>
+              <User />
+              Pick a name
             </button>
-          )}
-        </div>
-        {leaving && <LogoutConfirm onDone={stay} />}
-      </div>
-    </div>,
-    document.body,
+            <button className="secondary" onClick={() => (onClose(), openLogin())}>
+              <Key />
+              Log in
+            </button>
+          </div>
+        </section>
+      )}
+      <section className="field">
+        <h2 className="label">Phone</h2>
+        <PhoneLink player={player} />
+      </section>
+      {player && (
+        <button className="secondary danger" onClick={() => setLeaving(true)}>
+          <Logout />
+          Log out
+        </button>
+      )}
+      {leaving && <LogoutConfirm onDone={stay} />}
+    </Dialog>
   )
 }

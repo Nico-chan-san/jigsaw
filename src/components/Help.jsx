@@ -1,5 +1,4 @@
-import { useEffect } from 'react'
-import { Close } from './icons.jsx'
+import Dialog from './Dialog.jsx'
 
 const Key = ({ children }) => <kbd className="key">{children}</kbd>
 
@@ -10,6 +9,8 @@ const SECTIONS = [
       [<Key key="lp">Drag a piece</Key>, 'Move it'],
       [<Key key="lc">Click a piece</Key>, 'Select it (and turn it face up in hardcore mode)'],
       [<Key key="lt">Drag the table</Key>, 'Select'],
+      [<Key key="tr">Drag a tray</Key>, 'Move it, with the pieces in it'],
+      [<Key key="tc">Click a tray</Key>, 'Select it: space, G and Delete then work on it'],
       [<Key key="r">Right drag</Key>, 'Pan'],
       [<Key key="rc">Right click while dragging</Key>, 'Rotate held pieces'],
       [<Key key="w">Scroll</Key>, 'Zoom'],
@@ -27,7 +28,7 @@ const SECTIONS = [
         </>,
         'Pan (arrow keys too), faster the longer you hold',
       ],
-      [<Key key="sp">Space</Key>, 'Rotate held or selected pieces'],
+      [<Key key="sp">Space</Key>, "Rotate held or selected pieces, or a selected tray's"],
       [
         <>
           <Key>Shift</Key>
@@ -35,7 +36,7 @@ const SECTIONS = [
         </>,
         'Rotate them all together, around their centre',
       ],
-      [<Key key="g">G</Key>, 'Sort selected pieces into a grid'],
+      [<Key key="g">G</Key>, "Sort selected pieces into a grid, or a selected tray's"],
       [
         <>
           <Key>Shift</Key>
@@ -54,9 +55,9 @@ const SECTIONS = [
       [<Key key="f">F</Key>, 'Fullscreen'],
       [<Key key="h">H</Key>, 'This help'],
       [<Key key="v">V</Key>, 'View mode: dragging only moves the table'],
-      [<Key key="m">M</Key>, 'Side menu: modules, notes and images'],
       [<Key key="p">P</Key>, 'Players'],
       [<Key key="n">N</Key>, 'New note'],
+      [<Key key="t">T</Key>, 'New tray, to sort pieces into (around the selected pieces, if any)'],
       [<Key key="i">I</Key>, 'New image'],
       [<Key key="r">R</Key>, 'Reactions'],
       [<Key key="sh">Shift</Key>, 'Add to selection'],
@@ -73,7 +74,7 @@ const SECTIONS = [
           <Key>Delete</Key>
           <Key>Backspace</Key>
         </>,
-        'Remove selected notes and images',
+        'Remove selected notes, images and tray',
       ],
     ],
   },
@@ -88,41 +89,32 @@ const SECTIONS = [
 ]
 
 export default function Help({ onClose, closing }) {
-  useEffect(() => {
-    if (closing) return
-    const key = (e) => e.key === 'Escape' && onClose()
-    window.addEventListener('keydown', key)
-    return () => window.removeEventListener('keydown', key)
-  }, [onClose, closing])
-
   return (
-    <div className={`modal-bg${closing ? ' closing' : ''}`} onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal help" role="dialog" aria-label="How to play">
-        <div className="help-head">
-          <h1>How to play</h1>
-          <button className="icon-btn" onClick={onClose} aria-label="Close" title="Close">
-            <Close />
-          </button>
-        </div>
-        <div className="help-body">
-          {SECTIONS.map((s) => (
-            <section key={s.title} className={`help-${s.title.toLowerCase()}`}>
-              <h2 className="label">{s.title}</h2>
-              <dl>
-                {s.rows.map(([k, text], i) => (
-                  <div key={i} className="help-row">
-                    <dt>{k}</dt>
-                    <dd>{text}</dd>
-                  </div>
-                ))}
-              </dl>
-            </section>
-          ))}
-        </div>
+    <Dialog
+      title="How to play"
+      className="help"
+      bodyClass="help-body"
+      onClose={onClose}
+      closing={closing}
+      footer={
         <button className="primary wide" onClick={onClose}>
           Got it
         </button>
-      </div>
-    </div>
+      }
+    >
+      {SECTIONS.map((s) => (
+        <section key={s.title} className={`help-${s.title.toLowerCase()}`}>
+          <h2 className="label">{s.title}</h2>
+          <dl>
+            {s.rows.map(([k, text], i) => (
+              <div key={i} className="help-row">
+                <dt>{k}</dt>
+                <dd>{text}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      ))}
+    </Dialog>
   )
 }

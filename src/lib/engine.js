@@ -16,6 +16,24 @@ const r2 = (v) => Math.round(v * 100) / 100
 const LIVE_MS = 33
 // Length of the flip animation (ms), and how far a press may move and still count as a click.
 const FLIP_MS = 420
+// The burst where two pieces join: how long it lasts, after waiting for the pieces to land.
+const POP_MS = 520
+const POP_DELAY = 80
+const MAX_POPS = 12
+const calm = window.matchMedia?.('(prefers-reduced-motion: reduce)')
+// The size of an empty tray, in piece sizes.
+const TRAY_W = 6
+const TRAY_H = 4
+// Tray colours, by the name stored with each tray.
+export const TRAY_COLORS = {
+  blue: '#3b82f6',
+  green: '#22a06b',
+  yellow: '#e0a800',
+  orange: '#f97316',
+  red: '#e5484d',
+  purple: '#8e4ec6',
+  gray: '#8b8d98',
+}
 const CLICK_PX = 5
 const CLICK_MS = 400
 // Largest side of the cached sprite for a lifted selection.
@@ -66,7 +84,7 @@ const cursorColor = (id) => {
 }
 
 export class Engine {
-  constructor(canvas, { room, image, pieces, refs, overlay, user, userName, nameOf, guard, tooltip, send, onGroups, onComplete, onReady, onRef, onRefDelete, onRefs }) {
+  constructor(canvas, { room, image, pieces, refs, trays, overlay, user, userName, nameOf, guard, tooltip, send, onStats, onComplete, onRef, onRefDelete, onTray, onTrayDelete, onSnap }) {
     this.canvas = canvas
     // The board canvas only holds what changes from frame to frame: pieces in motion, the lifted
     // pieces, the hover outline, image handles and the selection box. The rest of the table (the
@@ -115,14 +133,19 @@ export class Engine {
     this.guard = guard
     this.tooltip = tooltip
     this.send = send
-    this.onGroups = onGroups
+    this.onStats = onStats
+    // Pieces just connected, by this player (local) or another: onSnap({ seams, local }).
+    this.onSnap = onSnap
     this.onComplete = onComplete
-    this.onReady = onReady
     // Reference image changes: onRef(ref, live) while and after editing, onRefDelete(id).
     this.onRef = onRef
     this.onRefDelete = onRefDelete
-    // Called with the image list whenever an image is added or removed.
-    this.onRefs = onRefs
+    // Tray changes: onTray(tray, live) while and after moving it, onTrayDelete(id).
+    this.onTray = onTray
+    this.onTrayDelete = onTrayDelete
+    // Called with (cam, vw, vh) whenever the view changes, see addView().
+    this.views = new Set()
+    this.viewsVer = 0
 
     this.geo = buildPuzzle(room)
     const n = (this.n = room.cols * room.rows)
@@ -148,7 +171,8 @@ export class Engine {
     this.selNotes = new Set()
     // Set by the notes layer: { get() -> [{ id, x, y, w, h }], move(list, send), select(ids), focus(id) }.
     this.notes = null
-    // Images and notes riding along with a drag: { pointer, wx, wy, sx0, sy0, moved, note, refs, notes }.
+    // Images, notes and trays riding along with a drag: { pointer, wx, wy, sx0, sy0, moved, note, refs,
+    // notes, trays }. A moved tray also has lift: the pieces in it, picked up once the pointer moves.
     this.carry = null
     this.marquee = null
     // Other players' drags in progress: client -> { ids, ox, oy, r0 }.
@@ -183,12 +207,19 @@ export class Engine {
     // Per piece: its sprite and halved copies of it (see levels()), made in the background.
     this.sprites = new Array(n)
     this.built = 0
-    this.ready = false
 
     // Reference images, shared by the room: { id, x, y, w, author } in world units (centre and width).
     this.refs = (refs || []).filter((r) => isFinite(r.x) && isFinite(r.y) && r.w > 0)
     this.refSel = null
     this.refDrag = null
+
+    // Trays, shared by the room: { id, x, y, w, h, color, pieces, author } in world units, x and y
+    // being the top left corner. pieces lists the pieces in it, which it fits itself around. The last
+    // one is on top. One can be selected: space and G then work on its pieces, Delete removes it.
+    this.trays = (trays || [])
+      .filter((t) => isFinite(t.x) && isFinite(t.y) && t.w > 0 && t.h > 0)
+      .map((t) => ({ ...t, pieces: Array.isArray(t.pieces) ? t.pieces : [] }))
+    this.traySel = null
     this.refAspect = image.naturalHeight / image.naturalWidth
     const rk = Math.min(1, 2048 / Math.max(image.naturalWidth, image.naturalHeight))
     this.refImg = document.createElement('canvas')
@@ -219,6 +250,8 @@ export class Engine {
     this.panMode = false
     this.held = new Map()
     this.moving = new Map()
+    // Bursts where pieces just joined: { x, y, t0, a } in world units.
+    this.pops = []
     this.colors = { bg: '#f4f4f4', dot: 'rgba(0,0,0,.12)', shadow: 'rgba(0,0,0,.35)', sel: '#2f6fed' }
     this.last = performance.now()
     this.lastLive = 0
@@ -434,6 +467,17 @@ export class Engine {
     return 900 / this.geo.S
   }
 
+  // Calls fn(cam, vw, vh) now and whenever the view changes. Returns a function that stops it.
+  addView(fn) {
+    this.views.add(fn)
+    this.viewsVer++
+    this.invalidate(false)
+    return () => {
+      this.views.delete(fn)
+      this.viewsVer++
+    }
+  }
+
   toWorld(sx, sy) {
     return [(sx - this.vw / 2) / this.cam.z + this.cam.x, (sy - this.vh / 2) / this.cam.z + this.cam.y]
   }
@@ -493,22 +537,6 @@ export class Engine {
     this.frame(this.bbox(this.order), 0.9, animate)
   }
 
-  focusGroup(gid) {
-    this.frame(this.bbox(this.members(gid)), 0.6)
-  }
-
-  focusRef(id) {
-    const ref = this.refs.find((r) => r.id === id)
-    if (!ref) return
-    const [w, h] = this.refSize(ref)
-    this.frame({ x0: ref.x - w / 2, y0: ref.y - h / 2, x1: ref.x + w / 2, y1: ref.y + h / 2 }, 0.6)
-  }
-
-  focusNote(id) {
-    const n = this.notes?.get().find((n) => n.id === id)
-    if (n) this.frame({ x0: n.x, y0: n.y, x1: n.x + n.w, y1: n.y + n.h }, 0.4)
-  }
-
   saveCam() {
     clearTimeout(this.camTimer)
     this.camTimer = setTimeout(() => {
@@ -551,22 +579,9 @@ export class Engine {
     return out
   }
 
-  groups() {
-    const map = new Map()
-    for (let i = 0; i < this.n; i++) {
-      const g = this.g[i]
-      if (!map.has(g)) map.set(g, [])
-      map.get(g).push(i)
-    }
-    return [...map.entries()]
-      .filter(([, ids]) => ids.length > 1)
-      .map(([g, ids]) => ({ g, size: ids.length, key: `${g}:${ids.length}:${this.r[g]}` }))
-      .sort((a, b) => b.size - a.size)
-  }
-
-  emitGroups() {
-    clearTimeout(this.groupTimer)
-    this.groupTimer = setTimeout(() => this.onGroups?.(this.groups()), 120)
+  emitStats() {
+    clearTimeout(this.statsTimer)
+    this.statsTimer = setTimeout(() => this.onStats?.(), 120)
   }
 
   toTop(set) {
@@ -593,10 +608,20 @@ export class Engine {
     return [...m.values()]
   }
 
-  // The selected pieces that nobody else is holding right now.
-  freeSelection() {
+  // The selected pieces that nobody else is holding right now. A selected tray counts as selecting
+  // its pieces (without outlining them), so space and G work on them too. With loose, groups that
+  // are in a tray are left out, so turning or sorting a selection leaves the trays as they are.
+  freeSelection(loose = false) {
     const now = performance.now()
-    return [...this.withGroups(this.sel)].filter((i) => !(this.held.get(i) > now))
+    if (!this.sel.size && this.traySel) {
+      const t = this.trays.find((x) => x.id === this.traySel)
+      return t ? this.trayPieces(t) : []
+    }
+    const ids = [...this.withGroups(this.sel)].filter((i) => !(this.held.get(i) > now))
+    if (!loose || !this.trays.some((t) => t.pieces.length)) return ids
+    const inTray = new Set(this.trays.flatMap((t) => t.pieces))
+    const skip = new Set(ids.filter((i) => inTray.has(i)).map((i) => this.g[i]))
+    return ids.filter((i) => !skip.has(this.g[i]))
   }
 
   // Ends any movement animation on these pieces, so they sit where they are headed.
@@ -690,6 +715,7 @@ export class Engine {
       note: from.note || null,
       refs: this.refs.filter((r) => this.selRefs.has(r.id)).map((r) => ({ id: r.id, x: r.x, y: r.y })),
       notes: notes.map((n) => ({ id: n.id, x: n.x, y: n.y })),
+      trays: [],
     }
     // Carried images go on top, like a lifted piece.
     this.refs = this.refs.filter((r) => !this.selRefs.has(r.id)).concat(this.refs.filter((r) => this.selRefs.has(r.id)))
@@ -703,21 +729,31 @@ export class Engine {
     return {
       refs: c.refs.map((r) => ({ id: r.id, x: r.x + dx, y: r.y + dy })),
       notes: c.notes.map((n) => ({ id: n.id, x: n.x + dx, y: n.y + dy })),
+      trays: c.trays.map((t) => ({ id: t.id, x: t.x + dx, y: t.y + dy })),
     }
+  }
+
+  // Each carried tray, where it is now.
+  carriedTrays(list) {
+    return list.map((p) => this.trays.find((t) => t.id === p.id)).filter(Boolean)
   }
 
   moveCarry(wx, wy) {
     const c = this.carry
     if (!c) return
     c.at = [wx, wy]
-    const { refs, notes } = this.carryAt(wx, wy)
+    const { refs, notes, trays } = this.carryAt(wx, wy)
     for (const p of refs) {
       const ref = this.refs.find((r) => r.id === p.id)
       if (ref) Object.assign(ref, p)
     }
+    for (const p of trays) {
+      const t = this.trays.find((x) => x.id === p.id)
+      if (t) Object.assign(t, p)
+    }
     if (notes.length) this.notes?.move(notes, null)
     this.sendCarry()
-    this.invalidate(!!refs.length)
+    this.invalidate(!!refs.length || !!trays.length)
   }
 
   sendCarry(force) {
@@ -727,11 +763,12 @@ export class Engine {
     if (!c?.at) return
     if (force || now - (this.lastCarry || 0) >= LIVE_MS) {
       this.lastCarry = now
-      const { refs, notes } = this.carryAt(...c.at)
+      const { refs, notes, trays } = this.carryAt(...c.at)
       for (const p of refs) {
         const ref = this.refs.find((r) => r.id === p.id)
         if (ref) this.onRef?.(ref, true)
       }
+      for (const t of this.carriedTrays(trays)) this.onTray?.(t, true)
       if (notes.length) this.notes?.move(notes, 'live')
     } else {
       this.carryTimer = setTimeout(() => this.sendCarry(true), LIVE_MS - (now - this.lastCarry))
@@ -749,11 +786,12 @@ export class Engine {
       return this.notes?.focus(c.note)
     }
     if (!c.at) return
-    const { refs, notes } = this.carryAt(...c.at)
+    const { refs, notes, trays } = this.carryAt(...c.at)
     for (const p of refs) {
       const ref = this.refs.find((r) => r.id === p.id)
       if (ref) this.onRef?.(ref, false)
     }
+    for (const t of this.carriedTrays(trays)) this.onTray?.(t, false)
     if (notes.length) this.notes?.move(notes, 'save')
   }
 
@@ -925,11 +963,13 @@ export class Engine {
 
     const [wx, wy] = this.toWorld(sx, sy)
     const rh = this.refHit(sx, sy)
+    const th = rh ? null : this.trayHit(sx, sy)
     const i = rh && rh.mode !== 'move' ? -1 : this.hit(wx, wy)
     if (i >= 0) {
       if (this.held.get(i) > performance.now()) return
       if (this.guard && !this.guard()) return
       this.selectRef(null)
+      this.selectTray(null)
       if (e.shiftKey) {
         // Shift-click toggles a group in or out of the selection.
         const grp = this.members(this.g[i])
@@ -957,6 +997,8 @@ export class Engine {
       return this.grabSelection(e)
     }
     if (rh) return this.startRefDrag(rh, e.pointerId, wx, wy)
+    if (th) return this.startTrayDrag(th, e.pointerId, sx, sy, wx, wy)
+    this.selectTray(null)
     if (e.pointerType === 'touch') return this.startPan(e.pointerId, sx, sy)
 
     // Left drag on the empty table draws a selection box; shift adds to the selection.
@@ -992,6 +1034,23 @@ export class Engine {
     const c = this.carry
     if (c && e.pointerId === c.pointer) {
       if (Math.hypot(sx - c.sx0, sy - c.sy0) > CLICK_PX) c.moved = true
+      // A tray starts moving: pick up its pieces, from where the press was, so they keep their place.
+      if (c.moved && c.lift) {
+        const l = c.lift
+        c.lift = null
+        if (l.ids.length) {
+          this.startDrag(l.ids, l.wx, l.wy, c.pointer, l.sx, l.sy)
+          // Not a click, so no piece gets turned over or selected.
+          this.drag.moved = true
+          // Lifted as if from the tray's middle: growing around the pointer would push the pieces
+          // far from it out over the tray's edge.
+          const t = this.trays.find((x) => x.id === c.trays[0].id)
+          if (t) {
+            this.lift.cx = c.trays[0].x + t.w / 2 - l.wx
+            this.lift.cy = c.trays[0].y + t.h / 2 - l.wy
+          }
+        }
+      }
       if (!this.drag) {
         this.moveCarry(...this.toWorld(sx, sy))
         return
@@ -1109,10 +1168,11 @@ export class Engine {
     if (e.key === 'Escape' && !this.drag) {
       if (this.selCount) this.setSelection(new Set())
       this.selectRef(null)
+      this.selectTray(null)
       return
     }
-    if ((e.key === 'Delete' || e.key === 'Backspace') && !this.refDrag && !this.drag) {
-      if (!this.refSel && !this.selRefs.size && !this.selNotes.size) return
+    if ((e.key === 'Delete' || e.key === 'Backspace') && !this.refDrag && !this.drag && !this.carry) {
+      if (!this.refSel && !this.traySel && !this.selRefs.size && !this.selNotes.size) return
       e.preventDefault()
       return this.removeSelected()
     }
@@ -1138,9 +1198,9 @@ export class Engine {
       if (e.repeat) return
       return key === ' ' ? this.spin(1, e.shiftKey) : this.gather(e.shiftKey)
     }
-    // With a selection on the table, space turns the pieces where they lie (shift: all as one) and G
-    // sorts them into a grid (shift: in random order).
-    if ((key === ' ' || key === 'g') && this.sel.size) {
+    // With a selection on the table (or a tray selected), space turns the pieces where they lie
+    // (shift: all as one) and G sorts them into a grid (shift: in random order).
+    if ((key === ' ' || key === 'g') && (this.sel.size || this.traySel)) {
       e.preventDefault()
       if (!e.repeat) key === 'g' ? this.sortSelection(e.shiftKey) : this.rotateSelection(1, e.shiftKey)
     }
@@ -1168,25 +1228,25 @@ export class Engine {
     }
     const [wx, wy] = this.toWorld(sx, sy)
     const rh = this.refHit(sx, sy)
+    const th = rh ? null : this.trayHit(sx, sy)
     const i = rh && rh.mode !== 'move' ? -1 : this.hit(wx, wy)
-    this.canvas.style.cursor =
-      i >= 0
-        ? 'grab'
-        : rh?.mode === 'del'
-          ? 'pointer'
-          : rh?.mode === 'resize'
-            ? rh.cx === rh.cy
-              ? 'nwse-resize'
-              : 'nesw-resize'
-            : rh
-              ? 'move'
-              : ''
+    this.canvas.style.cursor = this.cursorFor(i, rh, th)
     let hl = null
     if (i >= 0 && this.by[i] && this.connected(i)) hl = { key: `p:${i}`, ids: [i], text: this.nameOf(this.by[i]) }
     this.setHighlight(hl)
     // Hovering a reference image (not covered by a piece) shows who put it there.
     const text = hl ? hl.text : i < 0 && rh?.ref.author ? this.nameOf(rh.ref.author) : null
     this.showTip(text ? { text, sx, sy } : null)
+  }
+
+  // The pointer over a piece (i), an image's handles (rh) or a tray's name strip (th).
+  cursorFor(i, rh, th) {
+    if (i >= 0) return 'grab'
+    if (th) return 'move'
+    if (!rh) return ''
+    if (rh.mode === 'del') return 'pointer'
+    if (rh.mode === 'resize') return rh.cx === rh.cy ? 'nwse-resize' : 'nesw-resize'
+    return 'move'
   }
 
   setHighlight(hl) {
@@ -1391,6 +1451,7 @@ export class Engine {
   snapModules(mods) {
     const x0 = this.x.slice()
     const y0 = this.y.slice()
+    const g0 = this.g.slice()
     const changed = new Set()
     for (const m of mods) for (const j of this.snap(m)) changed.add(j)
     for (const i of changed) {
@@ -1399,14 +1460,47 @@ export class Engine {
       this.x[i] = x0[i]
       this.y[i] = y0[i]
     }
+    this.joined(g0, changed, true)
     return changed
+  }
+
+  // After pieces moved (ids) and the groups were g0 before: finds every new seam, where two
+  // neighbours that were apart are now in one group, and marks it with a burst and a sound.
+  joined(g0, ids, local) {
+    const { cols } = this.room
+    const set = ids instanceof Set ? ids : new Set(ids)
+    // Where a piece is going, if it's still easing there.
+    const at = (i) => this.moving.get(i) || [this.x[i], this.y[i]]
+    const seams = []
+    for (const i of set) {
+      const c = i % cols
+      for (const q of [c > 0 ? i - 1 : -1, c < cols - 1 ? i + 1 : -1, i - cols, i + cols]) {
+        if (q < 0 || q >= this.n || this.g[q] !== this.g[i] || g0[q] === g0[i]) continue
+        // Both moved: count the seam once.
+        if (q < i && set.has(q)) continue
+        const [x1, y1] = at(i)
+        const [x2, y2] = at(q)
+        seams.push([(x1 + x2) / 2, (y1 + y2) / 2])
+      }
+    }
+    if (!seams.length) return
+    this.onSnap?.({ seams: seams.length, local })
+    if (calm?.matches) return
+    // A long edge joining at once gets a few bursts spread along it, not one per seam.
+    const step = Math.max(1, seams.length / MAX_POPS)
+    const t0 = performance.now() + POP_DELAY
+    for (let k = 0; k < seams.length; k += step) {
+      const [x, y] = seams[Math.floor(k)]
+      this.pops.push({ x, y, t0: t0 + (k / step) * 25, a: Math.random() * Math.PI })
+    }
+    this.invalidate(false)
   }
 
   // Space with a selection: turns each selected module a quarter around its centre, on the table.
   // With whole (shift), the selection turns as one around its common centre.
   rotateSelection(dir, whole = false) {
     if (this.guard && !this.guard()) return
-    const ids = this.freeSelection()
+    const ids = this.freeSelection(true)
     if (!ids.length) return
     this.settle(ids)
     const mods = this.modules(ids)
@@ -1423,14 +1517,16 @@ export class Engine {
         this.turns.set(i, { cx, cy, a: (this.turns.get(i)?.a || 0) - dir * Q })
       }
     }
-    this.commit(this.snapModules(mods))
+    const changed = this.snapModules(mods)
+    this.fitTraysOf(ids)
+    this.commit(changed)
   }
 
   // Lays the selected modules out in a square grid, centred where the selection lies now.
   // With shuffle (shift), in random order rather than the order they lie in.
   sortSelection(shuffle = false) {
     if (this.guard && !this.guard()) return
-    const ids = this.freeSelection()
+    const ids = this.freeSelection(true)
     if (!ids.length) return
     this.settle(ids)
     const mods = this.modules(ids)
@@ -1458,6 +1554,7 @@ export class Engine {
       this.y[i] = y0[i]
     }
     this.toTop(new Set(ids))
+    this.fitTraysOf(ids)
     this.commit(changed)
   }
 
@@ -1471,7 +1568,7 @@ export class Engine {
         return { i, x, y, r: this.r[i], g: this.g[i], by: this.by[i], f: this.f[i] }
       }),
     })
-    this.emitGroups()
+    this.emitStats()
     this.invalidate()
     this.checkComplete()
   }
@@ -1533,8 +1630,10 @@ export class Engine {
     this.drag = null
 
     // Each carried group snaps on its own, so unrelated groups in a selection never merge by accident.
+    const g0 = this.g.slice()
     const changed = new Set()
     for (const grp of this.modules(d.ids)) for (const j of this.snap(grp)) changed.add(j)
+    this.joined(g0, changed, true)
 
     // The lift sprite can keep animating the landing if everything moved by the same snap offset.
     const l = this.lift
@@ -1549,6 +1648,9 @@ export class Engine {
     l.target = 0
 
     this.canvas.style.cursor = ''
+    // Pieces carried along with their tray stay in it, wherever it's let go.
+    const tray = this.carry?.trays[0] && this.trays.find((t) => t.id === this.carry.trays[0].id)
+    this.placeInTrays(d.ids, d.px, d.py, tray)
     this.commit(changed)
   }
 
@@ -1706,6 +1808,7 @@ export class Engine {
   }
 
   applyRemote(list) {
+    const g0 = this.g.slice()
     const touched = new Set()
     for (const p of list) {
       if (this.drag?.set.has(p.i)) continue
@@ -1722,7 +1825,8 @@ export class Engine {
     }
     if (touched.size) this.toTop(touched)
     if (this.sel.size) this.sel = this.withGroups(this.sel)
-    this.emitGroups()
+    this.joined(g0, touched, false)
+    this.emitStats()
     this.checkComplete()
     this.invalidate()
   }
@@ -1752,15 +1856,15 @@ export class Engine {
     this.refs.push(ref)
     this.selectRef(ref.id)
     this.onRef?.(ref, false)
-    this.onRefs?.(this.refs)
   }
 
-  // Delete or Backspace: removes the selected images and notes (pieces stay).
+  // Delete or Backspace: removes the selected images, notes and tray (pieces stay).
   removeSelected() {
     if (this.guard && !this.guard()) return
     const refs = new Set(this.selRefs)
     if (this.refSel) refs.add(this.refSel)
     const notes = [...this.selNotes]
+    if (this.traySel) this.removeTray(this.traySel)
     for (const id of refs) this.removeRef(id)
     if (notes.length) this.notes?.remove(notes)
     this.setSelection(this.sel)
@@ -1773,7 +1877,6 @@ export class Engine {
     this.selRefs.delete(id)
     if (this.refDrag?.ref.id === id) this.refDrag = null
     if (!remote) this.onRefDelete?.(id)
-    this.onRefs?.(this.refs)
     this.invalidate()
   }
 
@@ -1782,10 +1885,7 @@ export class Engine {
     if (this.refDrag?.ref.id === ref.id || this.carry?.refs.some((r) => r.id === ref.id)) return
     const cur = this.refs.find((r) => r.id === ref.id)
     if (cur) Object.assign(cur, ref)
-    else {
-      this.refs.push(ref)
-      this.onRefs?.(this.refs)
-    }
+    else this.refs.push(ref)
     this.invalidate()
   }
 
@@ -1794,7 +1894,6 @@ export class Engine {
     this.refs = refs.map((r) => (dragging && r.id === dragging.id ? dragging : r))
     if (this.refSel && !this.refs.some((r) => r.id === this.refSel)) this.refSel = null
     for (const id of this.selRefs) if (!this.refs.some((r) => r.id === id)) this.selRefs.delete(id)
-    this.onRefs?.(this.refs)
     this.invalidate()
   }
 
@@ -1900,6 +1999,195 @@ export class Engine {
     this.invalidate()
   }
 
+  // ---- trays ----------------------------------------------------------------
+
+  // Adds a tray in a random colour (one no other tray has, while there are some left). With pieces
+  // selected, it's made around them, taking them out of any tray they were in. Otherwise it's empty,
+  // centred on a canvas point or the middle of the view.
+  addTray(sx = this.vw / 2, sy = this.vh / 2) {
+    if (this.guard && !this.guard()) return
+    const ids = this.sel.size ? this.freeSelection() : []
+    const [x, y] = this.toWorld(sx, sy)
+    const w = this.geo.S * TRAY_W
+    const h = this.geo.S * TRAY_H
+    const keys = Object.keys(TRAY_COLORS)
+    const used = new Set(this.trays.map((t) => t.color))
+    const free = keys.filter((k) => !used.has(k))
+    const pick = free.length ? free : keys
+    const color = pick[Math.floor(Math.random() * pick.length)]
+    const tray = {
+      id: Math.random().toString(36).slice(2, 10),
+      x: x - w / 2,
+      y: y - h / 2,
+      w,
+      h,
+      color,
+      pieces: [],
+      author: this.user || '',
+    }
+    const left = []
+    if (ids.length) {
+      const moved = new Set(ids)
+      for (const t of this.trays) {
+        if (!t.pieces.some((i) => moved.has(i))) continue
+        t.pieces = t.pieces.filter((i) => !moved.has(i))
+        left.push(t)
+      }
+      tray.pieces = ids
+      this.fitTray(tray)
+    }
+    this.trays.push(tray)
+    this.refitTrays(left)
+    if (this.selCount) this.setSelection(new Set())
+    this.selectRef(null)
+    this.selectTray(tray.id)
+    this.onTray?.(tray, false)
+  }
+
+  selectTray(id) {
+    if (this.traySel === id) return
+    this.traySel = id
+    this.invalidate()
+  }
+
+  removeTray(id, remote = false) {
+    if (!remote && this.guard && !this.guard()) return
+    this.trays = this.trays.filter((t) => t.id !== id)
+    if (this.traySel === id) this.traySel = null
+    if (this.carry) this.carry.trays = this.carry.trays.filter((t) => t.id !== id)
+    if (!remote) this.onTrayDelete?.(id)
+    this.invalidate()
+  }
+
+  // Another player added, moved or filled a tray.
+  remoteTray(tray) {
+    if (this.carry?.trays.some((t) => t.id === tray.id)) return
+    const cur = this.trays.find((t) => t.id === tray.id)
+    if (cur) Object.assign(cur, tray)
+    else this.trays.push({ ...tray, pieces: tray.pieces || [] })
+    this.invalidate()
+  }
+
+  setTrays(trays) {
+    this.trays = trays.map((t) => ({ ...t, pieces: t.pieces || [] }))
+    if (this.traySel && !this.trays.some((t) => t.id === this.traySel)) this.traySel = null
+    this.invalidate()
+  }
+
+  // The topmost tray under a canvas point (pieces on it come first, see onDown).
+  trayHit(sx, sy) {
+    const [wx, wy] = this.toWorld(sx, sy)
+    for (let k = this.trays.length - 1; k >= 0; k--) {
+      const t = this.trays[k]
+      if (wx >= t.x && wx <= t.x + t.w && wy >= t.y && wy <= t.y + t.h) return { tray: t }
+    }
+    return null
+  }
+
+  // The pieces to carry with a tray: its own, with the rest of their groups, less any that someone
+  // else is holding.
+  trayPieces(t) {
+    const now = performance.now()
+    return [...this.withGroups(t.pieces)].filter((i) => !(this.held.get(i) > now))
+  }
+
+  // Where a piece is going, if it's still easing there.
+  target(i) {
+    return this.moving.get(i) || [this.x[i], this.y[i]]
+  }
+
+  // The margin between a tray's edge and the middles of its outermost pieces.
+  get trayPad() {
+    return this.radius + this.geo.S * 0.25
+  }
+
+  // Fits a tray around its pieces, with a margin. An empty tray keeps
+  // its top left corner and shrinks to the size of a new one.
+  fitTray(t) {
+    const S = this.geo.S
+    if (!t.pieces.length) {
+      t.w = S * TRAY_W
+      t.h = S * TRAY_H
+      return
+    }
+    let x0 = Infinity
+    let y0 = Infinity
+    let x1 = -Infinity
+    let y1 = -Infinity
+    for (const i of t.pieces) {
+      const [x, y] = this.target(i)
+      x0 = Math.min(x0, x)
+      y0 = Math.min(y0, y)
+      x1 = Math.max(x1, x)
+      y1 = Math.max(y1, y)
+    }
+    const pad = this.trayPad
+    t.x = x0 - pad
+    t.y = y0 - pad
+    t.w = x1 - x0 + pad * 2
+    t.h = y1 - y0 + pad * 2
+  }
+
+  // After this player dropped pieces (ids) with the pointer at (wx, wy): everything carried goes in
+  // the tray given (the one it was carried with), or else the tray under the pointer, and comes out
+  // of its tray when let go of anywhere else. Every tray that gained or lost pieces, or had them
+  // moved, fits itself around them again.
+  placeInTrays(ids, wx, wy, into = null) {
+    if (!this.trays.length) return
+    for (let k = this.trays.length - 1; k >= 0 && !into; k--) {
+      const t = this.trays[k]
+      if (wx >= t.x && wx <= t.x + t.w && wy >= t.y && wy <= t.y + t.h) into = t
+    }
+    const moved = this.withGroups(ids)
+    const touched = new Set(into ? [into] : [])
+    for (const t of this.trays) {
+      if (t === into || !t.pieces.some((i) => moved.has(i))) continue
+      t.pieces = t.pieces.filter((i) => !moved.has(i))
+      touched.add(t)
+    }
+    if (into) into.pieces = [...new Set([...into.pieces, ...moved])]
+    this.refitTrays(touched)
+  }
+
+  // After pieces were turned or sorted: the trays they're in fit themselves around them again.
+  fitTraysOf(ids) {
+    const set = ids instanceof Set ? ids : new Set(ids)
+    this.refitTrays(this.trays.filter((t) => t.pieces.some((i) => set.has(i))))
+  }
+
+  refitTrays(trays) {
+    for (const t of trays) {
+      this.fitTray(t)
+      this.onTray?.(t, false)
+    }
+    if (trays.size || trays.length) this.invalidate()
+  }
+
+  // A press on a tray: moves it, carrying the pieces in it along. The pieces are only
+  // picked up once the pointer moves, so a click just selects the tray.
+  startTrayDrag(th, pointer, sx, sy, wx, wy) {
+    const t = th.tray
+    if (this.guard && !this.guard()) return
+    if (this.selCount) this.setSelection(new Set())
+    this.selectRef(null)
+    this.selectTray(t.id)
+    this.trays = this.trays.filter((x) => x !== t).concat(t)
+    this.carry = {
+      pointer,
+      wx,
+      wy,
+      sx0: sx,
+      sy0: sy,
+      moved: false,
+      note: null,
+      refs: [],
+      notes: [],
+      trays: [{ id: t.id, x: t.x, y: t.y }],
+      lift: { ids: this.trayPieces(t), wx, wy, sx, sy },
+    }
+    this.invalidate()
+  }
+
   // ---- rendering ----------------------------------------------------------
 
   render() {
@@ -1915,10 +2203,6 @@ export class Engine {
       this.buildSome(now + 12)
       if (this.built !== had) this.sceneVer++
       again = true
-    }
-    if (!this.ready && this.built === this.n) {
-      this.ready = true
-      this.onReady?.()
     }
 
     if (this.camAnim) {
@@ -2060,6 +2344,8 @@ export class Engine {
       } else again = true
     }
 
+    if (this.pops.length) again = true
+
     this.updateActive(now)
     this.draw(now)
     if (again) this.invalidate(false)
@@ -2103,7 +2389,7 @@ export class Engine {
   draw(now) {
     const { ctx, cam, vw, vh } = this
     const mv = this.mv
-    if (cam.x !== mv.x || cam.y !== mv.y || cam.z !== mv.z || vw !== mv.w || vh !== mv.h || this.onView !== this.viewFn) {
+    if (cam.x !== mv.x || cam.y !== mv.y || cam.z !== mv.z || vw !== mv.w || vh !== mv.h || this.viewsVer !== this.viewFn) {
       // The stacked layers are scaled while the zoom changes and redrawn once it rests.
       if (cam.z !== mv.z) {
         this.zoomedAt = now
@@ -2115,8 +2401,8 @@ export class Engine {
       mv.z = cam.z
       mv.w = vw
       mv.h = vh
-      this.viewFn = this.onView
-      this.onView?.(cam, vw, vh)
+      this.viewFn = this.viewsVer
+      for (const fn of this.views) fn(cam, vw, vh)
     }
     this.frameNo++
 
@@ -2178,9 +2464,10 @@ export class Engine {
     ctx.fillRect(0, 0, W, H)
     this.drawDots(ctx, v)
 
-    // Reference images lie under the pieces.
+    // Trays, then reference images, lie under the pieces.
     const z = v.z * dpr
     const { x0: wx0, y0: wy0, x1: wx1, y1: wy1 } = this.cullRect(v, 0)
+    this.drawTrays(ctx, v, wx0, wy0, wx1, wy1)
     for (const ref of this.refs) {
       const [w, h] = this.refSize(ref)
       if (ref.x + w / 2 < wx0 || ref.x - w / 2 > wx1 || ref.y + h / 2 < wy0 || ref.y - h / 2 > wy1) continue
@@ -2202,6 +2489,32 @@ export class Engine {
       const y = this.qy
       if (x < cr.x0 || x > cr.x1 || y < cr.y0 || y > cr.y1) continue
       this.drawPiece(ctx, i, x, y, this.qa, 1, v)
+    }
+  }
+
+  // Each tray: a tinted, rounded box, outlined in the selection colour while selected.
+  drawTrays(ctx, v, wx0, wy0, wx1, wy1) {
+    if (!this.trays.length) return
+    const { dpr } = this
+    const z = v.z * dpr
+    const r = Math.min(this.geo.S * 0.25, 10 / v.z)
+    for (const t of this.trays) {
+      if (t.x + t.w < wx0 || t.x > wx1 || t.y + t.h < wy0 || t.y > wy1) continue
+      const color = TRAY_COLORS[t.color] || TRAY_COLORS.gray
+      const on = t.id === this.traySel
+      ctx.setTransform(z, 0, 0, z, ((t.x - v.x) * v.z + v.w / 2) * dpr, ((t.y - v.y) * v.z + v.h / 2) * dpr)
+      ctx.fillStyle = color
+      ctx.globalAlpha = 0.16
+      ctx.beginPath()
+      ctx.roundRect(0, 0, t.w, t.h, r)
+      ctx.fill()
+      ctx.globalAlpha = on ? 1 : 0.7
+      ctx.lineWidth = ((on ? 2.5 : 1.25) * dpr) / z
+      ctx.strokeStyle = on ? this.colors.sel : color
+      ctx.beginPath()
+      ctx.roundRect(0, 0, t.w, t.h, r)
+      ctx.stroke()
+      ctx.globalAlpha = 1
     }
   }
 
@@ -2282,18 +2595,26 @@ export class Engine {
     const { ctx, dpr, cam } = this
     const { vw, vh } = this
     const l = this.lift
+    // Lifted pieces grow a little, spreading out from the pointer as they do, or from (cx, cy) off
+    // it when set (a tray's middle, in the carried pieces' own frame, before any turn).
     const s = 1 + 0.045 * l.value
     const d = this.drag && this.drag.set === l.set ? this.drag : null
+    const a = d ? d.angle : l.angle
+    // Growing around (cx, cy) moves the pointer's own spot by (1 - s) of the way to it, turned with
+    // the pieces: (px, py) is where the carried pieces' origin is drawn, in world units.
+    const gx = (l.cx || 0) * (1 - s)
+    const gy = (l.cy || 0) * (1 - s)
+    const px = l.px + gx * Math.cos(a) - gy * Math.sin(a)
+    const py = l.py + gx * Math.sin(a) + gy * Math.cos(a)
     this.dirty = true
 
     if (!d?.spinning && l.sprite) {
       const sp = l.sprite
-      const a = d ? d.angle : l.angle
       const z = (cam.z * dpr * s) / sp.res
       const co = Math.cos(a) * z
       const sn = Math.sin(a) * z
-      const X = ((l.px - cam.x) * cam.z + vw / 2) * dpr
-      const Y = ((l.py - cam.y) * cam.z + vh / 2) * dpr
+      const X = ((px - cam.x) * cam.z + vw / 2) * dpr
+      const Y = ((py - cam.y) * cam.z + vh / 2) * dpr
       const sh = this.shadowFor(sp, l.value, z)
       const q = sh.q
       ctx.setTransform(co * q, sn * q, -sn * q, co * q, X + (1 + 7 * l.value) * dpr, Y + (2 + 16 * l.value) * dpr)
@@ -2340,8 +2661,8 @@ export class Engine {
         const dy = d.oy[j] - d.cy[j]
         const ox = d.cx[j] + dx * Math.cos(a) - dy * Math.sin(a) + d.tx[j]
         const oy = d.cy[j] + dx * Math.sin(a) + dy * Math.cos(a) + d.ty[j]
-        const x = l.px + (ox * ca - oy * sa) * s
-        const y = l.py + (ox * sa + oy * ca) * s
+        const x = px + (ox * ca - oy * sa) * s
+        const y = py + (ox * sa + oy * ca) * s
         if (x + R * s < wx0 || x - R * s > wx1 || y + R * s < wy0 || y - R * s > wy1) continue
         this.drawPiece(lc, d.ids[j], x, y, d.r0[j] * Q + a + d.angle, s, mv)
         const X = ((x - cam.x) * cam.z + vw / 2) * dpr
@@ -2351,8 +2672,8 @@ export class Engine {
       }
     } else {
       for (const i of l.ids) {
-        const x = l.px + (this.x[i] - l.px) * s
-        const y = l.py + (this.y[i] - l.py) * s
+        const x = px + (this.x[i] - l.px) * s
+        const y = py + (this.y[i] - l.py) * s
         if (x + R * s < wx0 || x - R * s > wx1 || y + R * s < wy0 || y - R * s > wy1) continue
         this.drawPiece(lc, i, x, y, this.r[i] * Q, s, mv)
         const X = ((x - cam.x) * cam.z + vw / 2) * dpr
@@ -2468,6 +2789,7 @@ export class Engine {
       ctx.stroke()
       ctx.lineCap = 'butt'
     }
+    this.drawPops()
     this.drawCursors()
     const m = this.marquee
     if (m && Math.abs(m.sx - m.sx0) + Math.abs(m.sy - m.sy0) > 2) {
@@ -2488,6 +2810,45 @@ export class Engine {
   }
 
   // Other players' pointers, each with their name in a tag of their colour.
+  // A ring and a few sparks growing out of each new seam, fading as they go. White with a soft
+  // shadow, so they show on any picture.
+  drawPops() {
+    const now = performance.now()
+    this.pops = this.pops.filter((p) => now - p.t0 < POP_MS)
+    if (!this.pops.length) return
+    const { ctx, dpr, cam, vw, vh } = this
+    this.dirty = true
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.35)'
+    ctx.shadowBlur = 4
+    ctx.strokeStyle = '#fff'
+    ctx.fillStyle = '#fff'
+    const size = Math.max(8, Math.min(44, this.geo.S * cam.z * 0.4))
+    for (const p of this.pops) {
+      const t = (now - p.t0) / POP_MS
+      if (t < 0) continue
+      const e = 1 - (1 - t) ** 3
+      const sx = (p.x - cam.x) * cam.z + vw / 2
+      const sy = (p.y - cam.y) * cam.z + vh / 2
+      ctx.globalAlpha = (1 - t) ** 1.5
+      ctx.lineWidth = 2.5 * (1 - t) + 0.5
+      ctx.beginPath()
+      ctx.arc(sx, sy, size * (0.25 + 0.75 * e), 0, Math.PI * 2)
+      ctx.stroke()
+      const d = size * (0.35 + 1.05 * e)
+      const r = 2.2 * (1 - t) + 0.4
+      for (let k = 0; k < 6; k++) {
+        const a = p.a + (k * Math.PI) / 3
+        ctx.beginPath()
+        ctx.arc(sx + Math.cos(a) * d, sy + Math.sin(a) * d, r, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
+    ctx.globalAlpha = 1
+    ctx.shadowBlur = 0
+    ctx.shadowColor = 'transparent'
+  }
+
   drawCursors() {
     const ctx = this.octx
     if (!ctx) return
@@ -2702,33 +3063,5 @@ export class Engine {
     const w = this.spriteW
     const h = this.spriteH
     ctx.drawImage(this.pick(lv, z), -w / 2, -h / 2, w, h)
-  }
-
-  // Renders a group, as it currently lies on the table, into a small canvas.
-  thumb(gid, canvas, size) {
-    const ids = this.members(gid)
-    if (!ids.length) return
-    const b = this.bbox(ids)
-    const bw = b.x1 - b.x0
-    const bh = b.y1 - b.y0
-    const k = size / Math.max(bw, bh)
-    const dpr = window.devicePixelRatio || 1
-    canvas.width = Math.max(1, Math.round(bw * k * dpr))
-    canvas.height = Math.max(1, Math.round(bh * k * dpr))
-    canvas.style.width = `${Math.round(bw * k)}px`
-    canvas.style.height = `${Math.round(bh * k)}px`
-    const ctx = canvas.getContext('2d')
-    const z = k * dpr
-    const w = this.spriteW
-    const h = this.spriteH
-    for (const i of ids) {
-      const lv = this.sprites[i]
-      if (!lv) continue
-      const a = this.r[i] * Q
-      const c = Math.cos(a) * z
-      const sn = Math.sin(a) * z
-      ctx.setTransform(c, sn, -sn, c, (this.x[i] - b.x0) * z, (this.y[i] - b.y0) * z)
-      ctx.drawImage(this.pick(lv, z), -w / 2, -h / 2, w, h)
-    }
   }
 }

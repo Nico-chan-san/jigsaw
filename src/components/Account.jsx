@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import { Arrow, Check, Copy } from './icons.jsx'
 import TextField from './TextField.jsx'
+import Dialog, { Tabs } from './Dialog.jsx'
 
 // The player's passphrase as four word chips, with a button that copies it.
 export function Passphrase({ value }) {
@@ -112,24 +113,25 @@ export function PassphraseWarning({ value }) {
   )
 }
 
-// Modal for signing up with a name ('name'), logging in with a passphrase ('login'), and showing a
-// new passphrase ('show', after signing up, or with player given). 'returning' greets someone whose
-// browser knew them only by name (from before passphrases) when that name already has a
-// passphrase: they log in with it, or start fresh. 'email' logs in with an email and password.
+// The three ways in, as tabs under the login dialog's title.
+const TABS = [
+  { key: 'name', title: 'New player', hint: 'Pick a name' },
+  { key: 'login', title: 'Passphrase', hint: 'Log in with your passphrase' },
+  { key: 'email', title: 'Email', hint: 'Log in with email and password' },
+]
+
+// Modal for signing up with a name ('name'), logging in with a passphrase ('login') or with an
+// email and password ('email'), one tab each, and showing a new passphrase ('show', after signing
+// up, or with player given). 'returning' greets someone whose browser knew them only by name (from
+// before passphrases) when that name already has a passphrase: they log in with it, or start fresh.
 // onSignUp, onLogin and onLoginEmail resolve with the player.
 export default function AccountPrompt({ mode: start, name, player, onSignUp, onLogin, onLoginEmail, onDone, onCancel }) {
-  const [mode, setMode] = useState(start)
+  // Log in opens on the first tab too, New player.
+  const [mode, setMode] = useState(start === 'login' ? 'name' : start)
   const [value, setValue] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [made, setMade] = useState(player || null)
-
-  // Escape never throws away a player that was just made.
-  useEffect(() => {
-    const key = (e) => e.key === 'Escape' && (mode === 'show' ? onDone(made) : onCancel())
-    window.addEventListener('keydown', key)
-    return () => window.removeEventListener('keydown', key)
-  }, [mode, made, onDone, onCancel])
 
   const fresh = async () => {
     setBusy(true)
@@ -174,95 +176,83 @@ export default function AccountPrompt({ mode: start, name, player, onSignUp, onL
   }
 
   if (mode === 'show') {
+    // Escape or a press outside never throws away a player that was just made.
     return (
-      <div className="modal-bg">
-        <div className="modal">
-          <h1>Your passphrase</h1>
-          <p className="modal-text">
-            {player && 'Players now log in with a passphrase, and this one is yours. '}
-            Keep these four words somewhere safe. They are your login: use them to play as {made.name} on another
-            device, or after logging out. You can always find them under Account.
-          </p>
-          <Passphrase value={made.passphrase} />
-          <button className="primary wide" autoFocus onClick={() => onDone(made)}>
-            Got it
-            <Arrow />
-          </button>
-        </div>
-      </div>
+      <Dialog title="Your passphrase" className="prompt" onClose={() => onDone(made)} closeButton={false}>
+        <p className="modal-text">
+          {player && 'Players now log in with a passphrase, and this one is yours. '}
+          Keep these four words somewhere safe. They are your login: use them to play as {made.name} on another
+          device, or after logging out. You can always find them under Account.
+        </p>
+        <Passphrase value={made.passphrase} />
+        <button type="button" className="primary wide" autoFocus onClick={() => onDone(made)}>
+          Got it
+          <Arrow />
+        </button>
+      </Dialog>
     )
   }
 
-  if (mode === 'email') {
-    return (
-      <div className="modal-bg" onPointerDown={(e) => e.target === e.currentTarget && onCancel()}>
-        <div className="modal">
-          <h1>Log in</h1>
+  const tabs = !returning && (
+    <div className="dialog-tabs">
+      <Tabs tabs={TABS} value={mode} onChange={switchTo} label="Log in or sign up" />
+    </div>
+  )
+
+  // One dialog for every tab, so switching tabs only changes what's in it.
+  return (
+    <Dialog title={returning ? `Welcome back, ${name}` : 'Log in'} className="prompt" onClose={onCancel}>
+      {tabs}
+      {mode === 'email' ? (
+        <>
           <p className="modal-text">Enter the email and password you switched your account to.</p>
           <EmailForm action="Log in" onSubmit={async (email, password) => onDone(await onLoginEmail(email, password))} />
-          <button type="button" className="link" onClick={() => switchTo('login')}>
-            Log in with a passphrase instead
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="modal-bg" onPointerDown={(e) => e.target === e.currentTarget && onCancel()}>
-      <form className="modal" onSubmit={submit}>
-        <h1>{returning ? `Welcome back, ${name}` : login ? 'Log in' : 'Your name'}</h1>
-        {returning && (
-          <p className="modal-text">
-            Players now log in with a four word passphrase. {name} already has one, from another device. Find it
-            under Account there, and enter it here to keep your progress.
-          </p>
-        )}
-        {mode === 'login' && (
-          <p className="modal-text">Enter the four word passphrase you got when you first picked a name.</p>
-        )}
-        <div className="row">
-          <TextField
-            bad={!!error}
-            autoFocus
-            value={value}
-            onChange={(e) => {
-              setValue(e.target.value)
-              setError('')
-            }}
-            onKeyDown={(e) => blocked && e.key === 'Enter' && e.preventDefault()}
-            placeholder={login ? 'four word passphrase' : 'Name'}
-            maxLength={login ? 200 : 32}
-            autoCapitalize="none"
-            autoComplete={login ? 'current-password' : 'nickname'}
-            spellCheck={false}
-            aria-label={login ? 'Passphrase' : 'Name'}
-            title={login ? 'Passphrase' : 'Name'}
-          />
-          <button className="primary" disabled={!value.trim() || busy} title={login ? 'Log in' : 'Continue'}>
-            {busy ? <span className="spin" /> : login ? 'Log in' : 'Continue'}
-            {!busy && <Arrow />}
-          </button>
-        </div>
-        {error && <p className="modal-error">{error}</p>}
-        {!login && !error && <PassphraseWarning value={value} />}
-        {returning ? (
-          <button type="button" className="link" onClick={fresh} disabled={busy}>
-            Not you, or no other device? Start fresh as a new {name}
-          </button>
-        ) : (
-          <div className="links">
-            {login && (
-              <button type="button" className="link" onClick={() => switchTo('email')}>
-                Log in with email and password
-              </button>
-            )}
-            <button type="button" className="link" onClick={() => switchTo(login ? 'name' : 'login')}>
-              {login ? 'New here? Pick a name instead' : 'Played before? Log in'}
+        </>
+      ) : (
+        <form className="prompt-form" onSubmit={submit}>
+          {returning && (
+            <p className="modal-text">
+              Players now log in with a four word passphrase. {name} already has one, from another device. Find it
+              under Account there, and enter it here to keep your progress.
+            </p>
+          )}
+          {mode === 'login' && (
+            <p className="modal-text">Enter the four word passphrase you got when you first picked a name.</p>
+          )}
+          {mode === 'name' && <p className="modal-text">Pick a name to play with. Everyone in the jigsaw sees it.</p>}
+          <div className="field-stack">
+            <TextField
+              key={mode}
+              bad={!!error}
+              autoFocus
+              value={value}
+              onChange={(e) => {
+                setValue(e.target.value)
+                setError('')
+              }}
+              onKeyDown={(e) => blocked && e.key === 'Enter' && e.preventDefault()}
+              placeholder={login ? 'four word passphrase' : 'Name'}
+              maxLength={login ? 200 : 32}
+              autoCapitalize="none"
+              autoComplete={login ? 'current-password' : 'nickname'}
+              spellCheck={false}
+              aria-label={login ? 'Passphrase' : 'Name'}
+              title={login ? 'Passphrase' : 'Name'}
+            />
+            {error && <p className="modal-error">{error}</p>}
+            {!login && !error && <PassphraseWarning value={value} />}
+            <button className="primary wide" disabled={!value.trim() || busy} title={login ? 'Log in' : 'Continue'}>
+              {busy ? <span className="spin" /> : login ? 'Log in' : 'Continue'}
+              {!busy && <Arrow />}
             </button>
           </div>
-        )}
-      </form>
-    </div>
+          {returning && (
+            <button type="button" className="link" onClick={fresh} disabled={busy}>
+              Not you, or no other device? Start fresh as a new {name}
+            </button>
+          )}
+        </form>
+      )}
+    </Dialog>
   )
 }

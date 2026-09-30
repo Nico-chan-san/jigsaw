@@ -8,7 +8,6 @@ import {
   Fullscreen,
   Hand,
   Help as HelpIcon,
-  Layers,
   Minus,
   Picture,
   Plus,
@@ -24,61 +23,9 @@ import Timers from '../components/Timers.jsx'
 import Celebration from '../components/Celebration.jsx'
 import { useLinger } from '../lib/linger.js'
 import { NoteButton, NotesLayer } from '../components/Notes.jsx'
-
-function Thumb({ engine, g, stamp }) {
-  const ref = useRef(null)
-  useEffect(() => {
-    engine.thumb(g, ref.current, 150)
-  }, [engine, g, stamp])
-  return <canvas ref={ref} />
-}
-
-function Section({ title, count, empty, children }) {
-  return (
-    <section>
-      <h2>
-        {title}
-        <span className="n">{count}</span>
-      </h2>
-      {count ? children : <p className="side-empty">{empty}</p>}
-    </section>
-  )
-}
-
-function Sidebar({ engine, roomId, groups, notes, refs, open, ready, nameOf }) {
-  return (
-    <aside className={`side${open ? ' open' : ''}`}>
-      <Section title="Groups" count={groups.length} empty="No pieces">
-        {groups.map((grp) => (
-          <button key={grp.g} onClick={() => engine.focusGroup(grp.g)} title={`${grp.size} pieces`}>
-            <Thumb engine={engine} g={grp.g} stamp={`${grp.key}:${ready}`} />
-            <span className="n">{grp.size}</span>
-          </button>
-        ))}
-      </Section>
-      <Section title="Notes" count={notes.length} empty="No notes yet">
-        {notes.map((n) => (
-          <button
-            key={n.id}
-            className="side-note"
-            onClick={() => engine.focusNote(n.id)}
-            title={n.author ? `Note by ${nameOf(n.author)}` : 'Note'}
-          >
-            <span className="side-note-text">{n.text.trim() || 'Empty note'}</span>
-            {n.author && <span className="side-note-by">{nameOf(n.author)}</span>}
-          </button>
-        ))}
-      </Section>
-      <Section title="Images" count={refs.length} empty="No images yet">
-        {refs.map((r) => (
-          <button key={r.id} onClick={() => engine.focusRef(r.id)} title={r.author ? `Image added by ${nameOf(r.author)}` : 'Image'}>
-            <img src={api.imageUrl(roomId)} alt="" draggable={false} />
-          </button>
-        ))}
-      </Section>
-    </aside>
-  )
-}
+import { TrayButton } from '../components/Trays.jsx'
+import { playSnap } from '../lib/sound.js'
+import { canFullscreen, fullscreenEl, toggleFullscreen, useFullscreen, useNotch } from '../lib/fullscreen.js'
 
 // A shortcut key shown in the corner of the button it belongs to.
 const KeyHint = ({ k }) => (
@@ -89,48 +36,6 @@ const KeyHint = ({ k }) => (
 
 // The controls fade away after this long without the pointer moving or a key being pressed.
 const IDLE_MS = 3000
-
-// Fullscreen for the whole page (Safari still only has the prefixed version).
-const fullscreenEl = () => document.fullscreenElement || document.webkitFullscreenElement || null
-const canFullscreen = () => {
-  const el = document.documentElement
-  return !!(el.requestFullscreen || el.webkitRequestFullscreen)
-}
-function toggleFullscreen() {
-  if (fullscreenEl()) return (document.exitFullscreen || document.webkitExitFullscreen)?.call(document)
-  const el = document.documentElement
-  const go = el.requestFullscreen || el.webkitRequestFullscreen
-  const done = go?.call(el, { navigationUI: 'hide' })
-  // Normally Escape always leaves fullscreen. Where the browser lets us keep it (Chrome, Edge),
-  // Escape clears the selection first (see Room), and holding it down leaves fullscreen.
-  done?.then?.(() => navigator.keyboard?.lock?.(['Escape']).catch(() => {}), () => {})
-}
-
-// Browsers report no safe area for the notch on MacBooks, even in fullscreen. Those screens are
-// 16:10 plus a strip at the top for the notch (1512x982 is 1512x945 and 37 more, at any scaling),
-// so on a Mac the extra height over 16:10, if it is a few percent, is the notch.
-function notchHeight() {
-  if (!/Mac/.test(navigator.platform) || navigator.maxTouchPoints > 1) return 0
-  const extra = screen.height - screen.width / 1.6
-  return extra > screen.height * 0.025 && extra < screen.height * 0.055 ? Math.round(extra) : 0
-}
-
-function useFullscreen() {
-  const [on, setOn] = useState(() => !!fullscreenEl())
-  useEffect(() => {
-    const change = () => {
-      setOn(!!fullscreenEl())
-      if (!fullscreenEl()) navigator.keyboard?.unlock?.()
-    }
-    document.addEventListener('fullscreenchange', change)
-    document.addEventListener('webkitfullscreenchange', change)
-    return () => {
-      document.removeEventListener('fullscreenchange', change)
-      document.removeEventListener('webkitfullscreenchange', change)
-    }
-  }, [])
-  return on
-}
 
 // True once nothing has happened for IDLE_MS. Stays false while the pointer is over the controls,
 // a menu or dialog is open, or the last input was touch (a tap on a hidden button would reach the
@@ -144,7 +49,7 @@ function useIdle() {
     const busy = () => over || touch || document.querySelector('.modal-bg, .settings-menu, .react-menu, .float :focus-visible')
     const sleep = () => (busy() ? (timer = setTimeout(sleep, IDLE_MS)) : setIdle(true))
     const wake = (e) => {
-      if (e.type !== 'keydown') over = !!e.target?.closest?.('.float, .side, .players, .podium-btn')
+      if (e.type !== 'keydown') over = !!e.target?.closest?.('.float, .players, .podium-btn')
       if (e.pointerType) touch = e.pointerType === 'touch'
       setIdle(false)
       clearTimeout(timer)
@@ -184,7 +89,7 @@ function takeLocalRefs(id) {
 }
 
 export default function Room({ id }) {
-  const { name, player, playerId, theme, ensureName, requireName, setDialog, dock } = useApp()
+  const { name, player, playerId, theme, ensureName, requireName, setDialog } = useApp()
   const me = useRef(playerId)
   me.current = playerId
   const sockRef = useRef(null)
@@ -206,11 +111,9 @@ export default function Room({ id }) {
   const noteBus = useRef(null)
   const reactBus = useRef(null)
   const createNote = useRef(null)
-  const [groups, setGroups] = useState([])
   const [stats, setStats] = useState(() => new Map())
   const [times, setTimes] = useState({})
   const [notes, setNotes] = useState([])
-  const [refs, setRefs] = useState([])
   // Player ids in the room right now, and when the others were last here.
   const [online, setOnline] = useState(() => new Set())
   const [seen, setSeen] = useState({})
@@ -224,12 +127,10 @@ export default function Room({ id }) {
   }, [id])
   const onTimes = useCallback((t) => setTimes(t), [])
   const onNotes = useCallback((n) => setNotes(n), [])
-  const [ready, setReady] = useState(false)
   const fullscreen = useFullscreen()
-  const notch = fullscreen ? notchHeight() : 0
+  const notch = useNotch()
   const idle = useIdle()
   const [error, setError] = useState(false)
-  const [side, setSide] = useState(() => store.get('side') === '1')
   // View mode: dragging with the left button (or a finger) moves the table, never pieces or notes.
   const [panMode, setPanMode] = useState(() => store.get('panMode') === '1')
   const [podium, setPodium] = useState(false)
@@ -259,6 +160,7 @@ export default function Room({ id }) {
           image,
           pieces: room.pieces,
           refs: room.refs || [],
+          trays: room.trays || [],
           overlay: cursors.current,
           user: playerId,
           userName: name,
@@ -268,12 +170,11 @@ export default function Room({ id }) {
           send: (msg) => sock?.send(msg),
           onRef: (ref, live) => api.saveRef(id, ref, live),
           onRefDelete: (refId) => api.deleteRef(id, refId),
-          onRefs: (list) => setRefs(list.map((r) => ({ id: r.id, author: r.author }))),
-          onGroups: (g) => {
-            setGroups(g)
-            setStats(eng.contributors())
-          },
-          onReady: () => setReady(true),
+          // What's in a tray only changes on a drop, so live updates (while dragging) leave it out.
+          onTray: (tray, live) => api.saveTray(id, live ? { ...tray, pieces: undefined } : tray, live),
+          onTrayDelete: (trayId) => api.deleteTray(id, trayId),
+          onStats: () => setStats(eng.contributors()),
+          onSnap: playSnap,
           onComplete: () => {
             setDone(true)
             // Celebrate once per player and jigsaw, whoever placed the last piece.
@@ -286,8 +187,6 @@ export default function Room({ id }) {
         setOnline(new Set(room.online || []))
         setSeen(room.seen || {})
         eng.setColors(readColors())
-        setGroups(eng.groups())
-        setRefs(eng.refs.map((r) => ({ id: r.id, author: r.author })))
         setStats(eng.contributors())
         setDone(eng.isComplete())
         // Already finished before this player opened it: nothing left to celebrate.
@@ -312,6 +211,8 @@ export default function Room({ id }) {
             else if (msg.type === 'react') reactBus.current?.(msg)
             else if (msg.type === 'ref') eng.remoteRef(msg.ref)
             else if (msg.type === 'ref-delete') eng.removeRef(msg.id, true)
+            else if (msg.type === 'tray') eng.remoteTray(msg.tray)
+            else if (msg.type === 'tray-delete') eng.removeTray(msg.id, true)
             else eng.remoteMessage(msg)
           },
           onOpen: async (reconnect) => {
@@ -320,6 +221,7 @@ export default function Room({ id }) {
             if (!fresh || dead) return
             eng.resync(fresh.pieces)
             eng.setRefs(fresh.refs || [])
+            eng.setTrays(fresh.trays || [])
             learn(fresh.players)
             setOnline(new Set(fresh.online || []))
             setSeen(fresh.seen || {})
@@ -366,10 +268,6 @@ export default function Room({ id }) {
   }, [engine, theme])
 
   useEffect(() => {
-    store.set('side', side ? '1' : '0')
-  }, [side])
-
-  useEffect(() => {
     store.set('panMode', panMode ? '1' : '0')
     if (!engine) return
     engine.panMode = panMode
@@ -401,7 +299,7 @@ export default function Room({ id }) {
     return () => window.removeEventListener('keydown', key, true)
   }, [engine])
 
-  // H help, V view mode, M side menu (modules, notes, images), P players, N note, I image, + and - zoom, C centres, F fullscreen. Arrow keys and WASD pan (see the engine). New notes and images go under the pointer when it's on the table.
+  // H help, V view mode, P players, N note, T tray, I image, + and - zoom, C centres, F fullscreen. Arrow keys and WASD pan (see the engine). New notes, trays and images go under the pointer when it's on the table.
   useEffect(() => {
     if (!engine) return
     const key = (e) => {
@@ -412,13 +310,13 @@ export default function Room({ id }) {
       const r = engine.canvas.getBoundingClientRect()
       const p = engine.pointerAt
       const el = p && document.elementFromPoint(p[0] + r.left, p[1] + r.top)
-      const over = el && !el.closest('.float, .side, .players') ? p : null
+      const over = el && !el.closest('.float, .players') ? p : null
       const k = e.key.toLowerCase()
       if (k === 'h') setHelp(true)
       else if (k === 'v') setPanMode((v) => !v)
-      else if (k === 'm') setSide((s) => !s)
       else if (k === 'p') setPlayers((s) => !s)
       else if (k === 'n') createNote.current?.(over ? over[0] + r.left : null, over ? over[1] + r.top : null)
+      else if (k === 't') (over ? engine.addTray(...over) : engine.addTray())
       else if (k === 'i') (over ? engine.addRef(...over) : engine.addRef())
       else if (k === '+' || k === '=') engine.zoomBy(1.4)
       else if (k === '-' || k === '_') engine.zoomBy(1 / 1.4)
@@ -431,63 +329,55 @@ export default function Room({ id }) {
     return () => window.removeEventListener('keydown', key)
   }, [engine])
 
-  // The toolbar buttons, in four groups: in the corners and top middle, or (with the top toolbar
-  // setting) all in one bar at the top middle, separated. Both layouts are the same elements with
-  // other classes, so switching keeps the timers and menus as they are.
+  // The toolbar buttons, in four groups: in the corners and at the top middle, where the play tools
+  // are three bars side by side.
   const nav = (
-    <>
-      <button className="icon-btn" onClick={() => setDialog('rooms')} aria-label="All jigsaws" title="All jigsaws">
-        <Rooms />
-      </button>
-      <button
-        className={`icon-btn${side ? ' on' : ''}`}
-        onClick={() => setSide((s) => !s)}
-        aria-label="Overview"
-        aria-keyshortcuts="M"
-        title="Groups, notes and images (M)"
-      >
-        <Layers />
-        <KeyHint k="M" />
-      </button>
-    </>
+    <button className="icon-btn" onClick={() => setDialog('rooms')} aria-label="All jigsaws" title="All jigsaws">
+      <Rooms />
+    </button>
   )
   const play = engine && (
     <>
-      <button
-        className={`icon-btn view-btn${panMode ? ' on' : ''}`}
-        onClick={() => setPanMode((v) => !v)}
-        aria-pressed={panMode}
-        aria-label="View mode"
-        aria-keyshortcuts="V"
-        title={panMode ? 'View mode on: dragging moves the table (V)' : 'View mode: drag to move the table (V)'}
-      >
-        <Hand />
-        <KeyHint k="V" />
-      </button>
-      <Reactions engine={engine} busRef={reactBus} hint={<KeyHint k="R" />} />
-      <span className="sep" />
-      <button
-        className={`stats-btn${players ? ' on' : ''}`}
-        onClick={() => setPlayers((s) => !s)}
-        aria-pressed={players}
-        aria-keyshortcuts="P"
-        title={players ? 'Hide players (P)' : 'Show players (P)'}
-      >
-        <Timers roomId={id} me={playerId} initial={data.times} busRef={timeBus} stopped={done} onTimes={onTimes} />
-        <KeyHint k="P" />
-      </button>
-      <span className="sep" />
-      <NoteButton createRef={createNote} hint={<KeyHint k="N" />} />
-      <button
-        className="icon-btn"
-        onClick={() => engine.addRef()}
-        aria-label="Reference image"
-        aria-keyshortcuts="I"
-        title="Add the reference image to the board (I)"
-      >
-        <Picture />
-        <KeyHint k="I" />
-      </button>
+      <div className="float">
+        <button
+          className={`icon-btn view-btn${panMode ? ' on' : ''}`}
+          onClick={() => setPanMode((v) => !v)}
+          aria-pressed={panMode}
+          aria-label="View mode"
+          aria-keyshortcuts="V"
+          title={panMode ? 'View mode on: dragging moves the table (V)' : 'View mode: drag to move the table (V)'}
+        >
+          <Hand />
+          <KeyHint k="V" />
+        </button>
+        <Reactions engine={engine} busRef={reactBus} hint={<KeyHint k="R" />} />
+      </div>
+      <div className="float">
+        <button
+          className={`stats-btn${players ? ' on' : ''}`}
+          onClick={() => setPlayers((s) => !s)}
+          aria-pressed={players}
+          aria-keyshortcuts="P"
+          title={players ? 'Hide players (P)' : 'Show players (P)'}
+        >
+          <Timers roomId={id} me={playerId} initial={data.times} busRef={timeBus} stopped={done} onTimes={onTimes} />
+          <KeyHint k="P" />
+        </button>
+      </div>
+      <div className="float">
+        <NoteButton createRef={createNote} hint={<KeyHint k="N" />} />
+        <TrayButton engine={engine} hint={<KeyHint k="T" />} />
+        <button
+          className="icon-btn"
+          onClick={() => engine.addRef()}
+          aria-label="Reference image"
+          aria-keyshortcuts="I"
+          title="Add the reference image to the board (I)"
+        >
+          <Picture />
+          <KeyHint k="I" />
+        </button>
+      </div>
     </>
   )
   const account = (
@@ -551,8 +441,7 @@ export default function Room({ id }) {
 
   return (
     <div
-      className={`room${panMode ? ' pan-mode' : ''}${idle ? ' idle' : ''}${notch ? ' notch' : ''}${dock ? ' docked' : ''}`}
-      style={notch ? { '--notch': `${notch}px` } : undefined}
+      className={`room${panMode ? ' pan-mode' : ''}${idle ? ' idle' : ''}${notch ? ' notch' : ''}`}
     >
       <canvas ref={canvas} className="board" tabIndex={0} />
       <div ref={tip} className="tip" />
@@ -576,15 +465,10 @@ export default function Room({ id }) {
         />
       )}
       <canvas ref={cursors} className="cursors" />
-      <div className={dock ? 'float dock' : 'bars'}>
-        <div className={dock ? 'bar' : 'float tl'}>{nav}</div>
-        {dock && play && <span className="sep" />}
-        {play && <div className={`play-tools ${dock ? 'bar' : 'float tc'}`}>{play}</div>}
-        {dock && <span className="sep" />}
-        <div className={dock ? 'bar' : 'float br'}>{view}</div>
-        {dock && <span className="sep" />}
-        <div className={dock ? 'bar' : 'float tr'}>{account}</div>
-      </div>
+      <div className="float tl">{nav}</div>
+      {play && <div className="play-tools tc">{play}</div>}
+      <div className="float br">{view}</div>
+      <div className="float tr">{account}</div>
       {helpShown && <Help onClose={closeHelp} closing={helpClosing} />}
       {party && <Celebration onDone={endParty} />}
       {engine && done && (
@@ -598,9 +482,6 @@ export default function Room({ id }) {
           closing={podiumClosing}
           onClose={closePodium}
         />
-      )}
-      {engine && (
-        <Sidebar engine={engine} roomId={id} groups={groups} notes={notes} refs={refs} open={side} ready={ready} nameOf={nameOf} />
       )}
       {engine && <Players open={players} stats={stats} times={times} notes={notes} me={playerId} owner={data?.owner} nameOf={nameOf} online={online} seen={seen} />}
     </div>

@@ -22,14 +22,6 @@ export const Rooms = (p) => (
   </Svg>
 )
 
-export const Layers = (p) => (
-  <Svg {...p}>
-    <path d="M12 4 3.5 8.5 12 13l8.5-4.5L12 4Z" />
-    <path d="m3.5 12.5 8.5 4.5 8.5-4.5" />
-    <path d="m3.5 16.5 8.5 4.5 8.5-4.5" />
-  </Svg>
-)
-
 export const Sun = (p) => (
   <Svg {...p}>
     <circle cx="12" cy="12" r="4" />
@@ -37,16 +29,17 @@ export const Sun = (p) => (
   </Svg>
 )
 
-export const Dock = (p) => (
-  <Svg {...p}>
-    <rect x="3" y="4" width="18" height="16" rx="2" />
-    <path d="M8 8h8" />
-  </Svg>
-)
-
 export const Moon = (p) => (
   <Svg {...p}>
     <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" />
+  </Svg>
+)
+
+export const Sound = (p) => (
+  <Svg {...p}>
+    <path d="M4 9.5h3l4.5-4v13L7 14.5H4v-5Z" />
+    <path d="M15 9a4 4 0 0 1 0 6" />
+    <path d="M17.5 6.5a7.5 7.5 0 0 1 0 11" />
   </Svg>
 )
 
@@ -127,6 +120,13 @@ export const Note = (p) => (
   <Svg {...p}>
     <path d="M5 4h14v10l-5 6H5V4Z" />
     <path d="M14 20v-6h5" />
+  </Svg>
+)
+
+export const Tray = (p) => (
+  <Svg {...p}>
+    <rect x="3.5" y="5" width="17" height="14" rx="2" />
+    <path d="M3.5 9.5h17" />
   </Svg>
 )
 

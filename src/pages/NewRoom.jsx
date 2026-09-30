@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { api } from '../lib/api.js'
 import { SHAPES, buildPuzzle, gridFor, outlinePath, pile, samplePiecePath, scatter } from '../lib/geometry.js'
 import { useApp } from '../App.jsx'
-import { Arrow, Chevron, Upload } from '../components/icons.jsx'
+import { Arrow, Chevron, Close, Upload } from '../components/icons.jsx'
 import InviteList from '../components/Invite.jsx'
 import TextField from '../components/TextField.jsx'
 
@@ -24,6 +25,14 @@ function loadImage(file) {
     img.src = url
   })
 }
+
+// A title from a file name, without its extension.
+const titleFrom = (name) =>
+  name
+    .replace(/\.[^.]+$/, '')
+    .replace(/[-_]+/g, ' ')
+    .trim()
+    .slice(0, 60)
 
 function encode(img, maxSide, quality) {
   const k = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight))
@@ -55,10 +64,33 @@ function ShapeIcon({ shape }) {
 
 const shapeName = (s) => s[0].toUpperCase() + s.slice(1)
 
-// A dropdown of piece shapes, each shown with its outline.
+// A dropdown of piece shapes, each shown with its outline. The list floats over the window
+// (position: fixed), so opening it doesn't grow or scroll the form around it. It opens below the
+// button, or above when there's no room, and follows the button when the form scrolls.
 function ShapePicker({ value, onChange }) {
   const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState(null)
   const wrap = useRef(null)
+  const btn = useRef(null)
+  const menu = useRef(null)
+
+  useLayoutEffect(() => {
+    if (!open) return setPos(null)
+    const place = () => {
+      const b = btn.current.getBoundingClientRect()
+      const h = menu.current.offsetHeight
+      const below = window.innerHeight - b.bottom - 6 >= h + 8 || b.top < h + 14
+      setPos({ top: below ? b.bottom + 6 : b.top - 6 - h, right: window.innerWidth - b.right, minWidth: b.width })
+    }
+    place()
+    menu.current.querySelector('[aria-selected="true"]')?.focus({ preventScroll: true })
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [open])
 
   // Close on a press anywhere else, or Escape (which then leaves the window open).
   useEffect(() => {
@@ -80,6 +112,7 @@ function ShapePicker({ value, onChange }) {
   return (
     <div className="shape-picker" ref={wrap}>
       <button
+        ref={btn}
         type="button"
         className={`shape-btn${open ? ' on' : ''}`}
         onClick={() => setOpen((o) => !o)}
@@ -92,7 +125,13 @@ function ShapePicker({ value, onChange }) {
         <Chevron className="shape-chevron" />
       </button>
       {open && (
-        <ul className="shape-menu" role="listbox" aria-label="Shape">
+        <ul
+          ref={menu}
+          className="shape-menu"
+          role="listbox"
+          aria-label="Shape"
+          style={pos || { top: 0, left: -9999 }}
+        >
           {SHAPES.map((s) => (
             <li key={s}>
               <button
@@ -100,7 +139,6 @@ function ShapePicker({ value, onChange }) {
                 className={`shape-option${s === value ? ' on' : ''}`}
                 role="option"
                 aria-selected={s === value}
-                autoFocus={s === value}
                 onClick={() => {
                   onChange(s)
                   setOpen(false)
@@ -149,8 +187,9 @@ function Preview({ img, cols, rows, shape, seed }) {
   return <canvas ref={ref} />
 }
 
-// The new jigsaw form, shown inside the jigsaws window.
-export default function NewRoom() {
+// The new jigsaw form, shown inside the jigsaws window: the image on the left, its settings on the
+// right, and the Create button in the window's bar (where New jigsaw was).
+export default function NewRoom({ bar }) {
   const { requireName, currentPlayer, openRoom } = useApp()
   const [img, setImg] = useState(null)
   const [name, setName] = useState('')
@@ -165,27 +204,33 @@ export default function NewRoom() {
   const [invited, setInvited] = useState(() => new Set())
   const [over, setOver] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [link, setLink] = useState('')
-  const [fetching, setFetching] = useState(false)
-  const [linkError, setLinkError] = useState(false)
   const [seed] = useState(() => (Math.random() * 2 ** 31) | 0)
   const input = useRef(null)
 
   const grid = gridFor(count, img?.naturalWidth || 4, img?.naturalHeight || 3)
   const slider = toSlider(count)
 
+  // The title given from the image, which the next image may replace (a typed one it never does).
+  const autoName = useRef('')
+  const nameFrom = (text) => {
+    if (name.trim() && name !== autoName.current) return
+    autoName.current = titleFrom(text)
+    setName(autoName.current)
+  }
+
   // Pasted images get a generic file name like "image.png", so they don't set the title.
   const pick = async (file, named = true) => {
     if (!file || !file.type.startsWith('image/')) return
     const image = await loadImage(file)
     setImg(image)
-    if (named && !name)
-      setName(
-        file.name
-          .replace(/\.[^.]+$/, '')
-          .replace(/[-_]+/g, ' ')
-          .slice(0, 60),
-      )
+    if (named) nameFrom(file.name)
+  }
+
+  // Back to no image. A title that came from the image goes too.
+  const clear = () => {
+    setImg(null)
+    input.current.value = ''
+    if (name === autoName.current) setName('')
   }
 
   // Paste an image anywhere on the page. In a text field, text still pastes as usual.
@@ -203,33 +248,6 @@ export default function NewRoom() {
     window.addEventListener('paste', paste)
     return () => window.removeEventListener('paste', paste)
   }, [])
-
-  const fromLink = async (e) => {
-    e.preventDefault()
-    const url = link.trim()
-    if (!url || fetching) return
-    setFetching(true)
-    setLinkError(false)
-    try {
-      const res = await fetch(`/api/image?url=${encodeURIComponent(url)}`)
-      if (!res.ok) throw new Error()
-      const image = await loadImage(await res.blob())
-      setImg(image)
-      if (!name) {
-        const base = decodeURIComponent(new URL(url).pathname.split('/').pop() || '')
-        setName(
-          base
-            .replace(/\.[^.]+$/, '')
-            .replace(/[-_]+/g, ' ')
-            .slice(0, 60),
-        )
-      }
-    } catch {
-      setLinkError(true)
-    } finally {
-      setFetching(false)
-    }
-  }
 
   const create = async () => {
     if (!img || busy) return
@@ -271,70 +289,60 @@ export default function NewRoom() {
 
   return (
     <section className="create">
-      <section className="field">
-        <h2 className="label">Title</h2>
-        <TextField
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Title"
-          maxLength={60}
-          aria-label="Title"
-          title="Title"
-        />
-      </section>
-
       <div className="create-media">
-        <div
-          className={`drop${over ? ' over' : ''}${img ? ' has' : ''}`}
-          onClick={() => input.current.click()}
-          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && input.current.click()}
-          role="button"
-          tabIndex={0}
-          title={img ? 'Change image (or paste one)' : 'Upload, drop or paste an image'}
-          onDragOver={(e) => {
-            e.preventDefault()
-            setOver(true)
-          }}
-          onDragLeave={() => setOver(false)}
-          onDrop={(e) => {
-            e.preventDefault()
-            setOver(false)
-            pick(e.dataTransfer.files[0])
-          }}
-        >
-          {img ? (
-            <Preview img={img} {...grid} shape={shape} seed={seed} />
-          ) : (
-            <span className="drop-empty">
-              <span className="drop-icon">
-                <Upload className="big" />
-              </span>
-              <span className="drop-hint">Click to upload, drop an image here, or just paste one</span>
-            </span>
-          )}
-          <input ref={input} type="file" accept="image/*" onChange={(e) => pick(e.target.files[0])} />
-        </div>
-        <form className="row link-row" onSubmit={fromLink}>
-          <TextField
-            compact
-            bad={!!linkError}
-            type="url"
-            value={link}
-            onChange={(e) => {
-              setLink(e.target.value)
-              setLinkError(false)
+        <h2 className="label">Image</h2>
+        <div className="drop-wrap">
+          <div
+            className={`drop${over ? ' over' : ''}${img ? ' has' : ''}`}
+            onClick={() => input.current.click()}
+            onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && input.current.click()}
+            role="button"
+            tabIndex={0}
+            title={img ? 'Change image (or paste one)' : 'Upload, drop or paste an image'}
+            onDragOver={(e) => {
+              e.preventDefault()
+              setOver(true)
             }}
-            placeholder="Or paste a link to an image"
-            aria-label="Link to image"
-            title="Link to image"
-          />
-          <button className="secondary" disabled={!link.trim() || fetching} title="Load image">
-            {fetching ? <span className="spin" /> : 'Load'}
-          </button>
-        </form>
+            onDragLeave={() => setOver(false)}
+            onDrop={(e) => {
+              e.preventDefault()
+              setOver(false)
+              pick(e.dataTransfer.files[0])
+            }}
+          >
+            {img ? (
+              <Preview img={img} {...grid} shape={shape} seed={seed} />
+            ) : (
+              <span className="drop-empty">
+                <span className="drop-icon">
+                  <Upload className="big" />
+                </span>
+                <span className="drop-hint">Click to upload, drop an image here, or just paste one</span>
+              </span>
+            )}
+            <input ref={input} type="file" accept="image/*" onChange={(e) => pick(e.target.files[0])} />
+          </div>
+          {img && (
+            <button type="button" className="icon-btn drop-clear" onClick={clear} aria-label="Remove image" title="Remove image">
+              <Close />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="create-settings">
+        <section className="field">
+          <h2 className="label">Title</h2>
+          <TextField
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Title"
+            maxLength={60}
+            aria-label="Title"
+            title="Title"
+          />
+        </section>
+
         <div className="row pieces-row">
           <section className="field grow">
             <h2 className="label">Pieces</h2>
@@ -392,23 +400,27 @@ export default function NewRoom() {
             )}
           </div>
         </section>
-
-        <button
-          className="primary wide"
-          onClick={create}
-          disabled={!img || busy}
-          title={img ? 'Create jigsaw' : 'Add an image first'}
-        >
-          {busy ? (
-            <span className="spin" />
-          ) : (
-            <>
-              Create jigsaw
-              <Arrow />
-            </>
-          )}
-        </button>
       </div>
+
+      {bar &&
+        createPortal(
+          <button
+            className="primary new-btn create-btn"
+            onClick={create}
+            disabled={!img || busy}
+            title={img ? 'Create jigsaw' : 'Add an image first'}
+          >
+            {busy ? (
+              <span className="spin" />
+            ) : (
+              <>
+                <span>Create jigsaw</span>
+                <Arrow />
+              </>
+            )}
+          </button>,
+          bar,
+        )}
     </section>
   )
 }

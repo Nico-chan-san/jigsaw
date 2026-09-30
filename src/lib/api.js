@@ -56,11 +56,13 @@ export const api = {
       keepalive: true,
     }).catch(() => {})
   },
-  // Notes and reference images go over the room socket; live=true is a drag in progress (not saved).
+  // Notes, reference images and trays go over the room socket; live=true is a drag in progress (not saved).
   saveNote: (id, note, live = false) => sockets.get(id)?.send({ type: 'note', live, note }),
   deleteNote: (id, noteId) => sockets.get(id)?.send({ type: 'note-delete', id: noteId }),
   saveRef: (id, ref, live = false) => sockets.get(id)?.send({ type: 'ref', live, ref }),
   deleteRef: (id, refId) => sockets.get(id)?.send({ type: 'ref-delete', id: refId }),
+  saveTray: (id, tray, live = false) => sockets.get(id)?.send({ type: 'tray', live, tray }),
+  deleteTray: (id, trayId) => sockets.get(id)?.send({ type: 'tray-delete', id: trayId }),
   // Live room channel. Reconnects on its own; onOpen(reconnect) fires on every connect.
   // Changes made while disconnected are queued and sent once the socket is back.
   socket: (id, { player, onMessage, onOpen }) => {

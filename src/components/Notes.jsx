@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { api } from '../lib/api.js'
 import { Close, Note as NoteIcon } from './icons.jsx'
+import PlaceButton from './PlaceButton.jsx'
 
 // Note size, in units of the jigsaw's piece size.
 const NOTE_W = 2.6
@@ -154,14 +154,13 @@ export function NotesLayer({ engine, roomId, me, nameOf, initial, busRef, create
 
   useEffect(() => {
     const el = layer.current
-    engine.onView = (cam, vw, vh) => {
+    const off = engine.addView((cam, vw, vh) => {
       el.style.transform = `translate(${vw / 2 - cam.x * cam.z}px, ${vh / 2 - cam.y * cam.z}px) scale(${cam.z})`
-    }
-    engine.invalidate()
+    })
     const wheel = (e) => engine.h.wheel(e)
     el.addEventListener('wheel', wheel, { passive: false })
     return () => {
-      engine.onView = null
+      off()
       el.removeEventListener('wheel', wheel)
     }
   }, [engine])
@@ -282,46 +281,16 @@ export function NotesLayer({ engine, roomId, me, nameOf, initial, busRef, create
 
 // Header button: drag it onto the board to drop a note there, or click to drop one in the centre.
 export function NoteButton({ createRef, hint }) {
-  const [ghost, setGhost] = useState(null)
-
-  const down = (e) => {
-    if (e.button !== 0) return
-    e.preventDefault()
-    const start = [e.clientX, e.clientY]
-    let moved = false
-    const move = (ev) => {
-      if (!moved && Math.hypot(ev.clientX - start[0], ev.clientY - start[1]) > 4) moved = true
-      if (moved) setGhost([ev.clientX, ev.clientY])
-    }
-    const up = (ev) => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      setGhost(null)
-      if (!moved) return createRef.current?.(null, null)
-      const el = document.elementFromPoint(ev.clientX, ev.clientY)
-      if (el && !el.closest('.float, .side')) createRef.current?.(ev.clientX, ev.clientY)
-    }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-  }
-
   return (
-    <>
-      <button
-        className="icon-btn"
-        onPointerDown={down}
-        aria-label="Note"
-        aria-keyshortcuts="N"
-        title="Drag a note onto the board (N)"
-      >
-        <NoteIcon />
-        {hint}
-      </button>
-      {ghost &&
-        createPortal(
-          <div className="note-ghost" style={{ transform: `translate(${ghost[0]}px, ${ghost[1]}px)` }} />,
-          document.body,
-        )}
-    </>
+    <PlaceButton
+      onPlace={(x, y) => createRef.current?.(x, y)}
+      ghost="note-ghost"
+      label="Note"
+      shortcut="N"
+      title="Drag a note onto the board (N)"
+    >
+      <NoteIcon />
+      {hint}
+    </PlaceButton>
   )
 }

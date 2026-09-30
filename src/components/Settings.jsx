@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from '../App.jsx'
-import { Changelog as ChangelogIcon, Dock, External, Gear, GitHub, Lock, Logout, Moon, User } from './icons.jsx'
+import { Changelog as ChangelogIcon, External, Gear, GitHub, Lock, Logout, Moon, Sound, User } from './icons.jsx'
 import Changelog from './Changelog.jsx'
 import AccountDialog, { LogoutConfirm } from './AccountDialog.jsx'
 import { useLinger } from '../lib/linger.js'
 import PrivateRoom from './PrivateRoom.jsx'
 
-// Header button that toggles a small settings panel: account, dark mode, top toolbar, changelog, source link and log out.
+// Header button that toggles a small settings panel: account, dark mode, sounds, changelog, source link and log out.
 // In a private jigsaw it also has a button that shows its link.
 export default function Settings({ privateRoom = false }) {
-  const { theme, toggleTheme, dock, toggleDock, player, roomId } = useApp()
+  const { theme, toggleTheme, sound, toggleSound, player, roomId } = useApp()
   const [sharing, setSharing] = useState(false)
   const closeSharing = useCallback(() => setSharing(false), [])
   const [open, setOpen] = useState(false)
@@ -80,13 +80,11 @@ export default function Settings({ privateRoom = false }) {
             <span>Dark mode</span>
             <span className={`switch${dark ? ' on' : ''}`} aria-hidden="true" />
           </button>
-          {roomId && (
-            <button className="settings-row" role="menuitemcheckbox" aria-checked={dock} onClick={toggleDock}>
-              <Dock />
-              <span>Top toolbar</span>
-              <span className={`switch${dock ? ' on' : ''}`} aria-hidden="true" />
-            </button>
-          )}
+          <button className="settings-row" role="menuitemcheckbox" aria-checked={sound} onClick={toggleSound}>
+            <Sound />
+            <span>Sounds</span>
+            <span className={`switch${sound ? ' on' : ''}`} aria-hidden="true" />
+          </button>
           <button
             className="settings-row"
             role="menuitem"

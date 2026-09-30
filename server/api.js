@@ -213,6 +213,17 @@ function createApi(dbFile) {
     ref: db.prepare('SELECT id, x, y, w, author, created FROM refs WHERE room_id = ? AND id = ?'),
     deleteRef: db.prepare('DELETE FROM refs WHERE room_id = ? AND id = ?'),
     deleteRefs: db.prepare('DELETE FROM refs WHERE room_id = ?'),
+    trays: db.prepare(
+      'SELECT id, x, y, w, h, name, color, pieces, author, created FROM trays WHERE room_id = ? ORDER BY created',
+    ),
+    upsertTray: db.prepare(`
+      INSERT INTO trays (id, room_id, x, y, w, h, name, color, pieces, author, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (room_id, id) DO UPDATE SET
+        x = excluded.x, y = excluded.y, w = excluded.w, h = excluded.h, name = excluded.name, color = excluded.color,
+        pieces = excluded.pieces`),
+    tray: db.prepare('SELECT id, x, y, w, h, name, color, pieces, author, created FROM trays WHERE room_id = ? AND id = ?'),
+    deleteTray: db.prepare('DELETE FROM trays WHERE room_id = ? AND id = ?'),
+    deleteTrays: db.prepare('DELETE FROM trays WHERE room_id = ?'),
     player: db.prepare('SELECT id, name FROM players WHERE id = ?'),
     // A passphrase, or the token of a device logged in with an email and password.
     playerBySecret: db.prepare(`
@@ -371,7 +382,22 @@ function createApi(dbFile) {
     author: String(b?.author || '').slice(0, 32),
   })
 
-  // Notes and reference images: live=true only relays (while dragging), otherwise it's saved.
+  const cleanTray = (b) => ({
+    id: String(b?.id || '').slice(0, 40),
+    x: +b?.x || 0,
+    y: +b?.y || 0,
+    w: Math.max(1, +b?.w || 0),
+    h: Math.max(1, +b?.h || 0),
+    name: String(b?.name || '').slice(0, 40),
+    color: String(b?.color || '').slice(0, 16),
+    // Left out of live updates (while dragging), which don't change what's in the tray.
+    pieces: Array.isArray(b?.pieces) ? b.pieces.filter((i) => Number.isInteger(i) && i >= 0).slice(0, 20000) : undefined,
+    author: String(b?.author || '').slice(0, 32),
+  })
+  // A stored tray, with its pieces as a list again.
+  const trayOut = (row) => row && { ...row, pieces: JSON.parse(row.pieces || '[]') }
+
+  // Notes, reference images and trays: live=true only relays (while dragging), otherwise it's saved.
   function putNote(roomId, b, live) {
     const n = cleanNote(b)
     if (!n.id) return null
@@ -387,6 +413,16 @@ function createApi(dbFile) {
     r.author = playerId(r.author) || ''
     q.upsertRef.run(r.id, roomId, r.x, r.y, r.w, r.author, Date.now())
     return q.ref.get(roomId, r.id)
+  }
+
+  function putTray(roomId, b, live) {
+    const t = cleanTray(b)
+    if (!t.id) return null
+    if (live) return { ...t, created: +b.created || 0 }
+    t.author = playerId(t.author) || ''
+    const pieces = JSON.stringify(t.pieces || trayOut(q.tray.get(roomId, t.id))?.pieces || [])
+    q.upsertTray.run(t.id, roomId, t.x, t.y, t.w, t.h, t.name, t.color, pieces, t.author, Date.now())
+    return trayOut(q.tray.get(roomId, t.id))
   }
 
   // One socket per open room. Live drag messages ("grab", "live") are only relayed;
@@ -422,12 +458,14 @@ function createApi(dbFile) {
         broadcast(roomId, { ...m, client }, ws)
       } else if (m.type === 'react' && isFinite(m.x) && isFinite(m.y)) {
         broadcast(roomId, { type: 'react', client, kind: String(m.kind || '').slice(0, 16), x: +m.x, y: +m.y }, ws)
-      } else if (m.type === 'note' || m.type === 'ref') {
-        const item = (m.type === 'note' ? putNote : putRef)(roomId, m[m.type], !!m.live)
+      } else if (m.type === 'note' || m.type === 'ref' || m.type === 'tray') {
+        const put = { note: putNote, ref: putRef, tray: putTray }[m.type]
+        const item = put(roomId, m[m.type], !!m.live)
         if (item) broadcast(roomId, { type: m.type, client, live: !!m.live, [m.type]: item }, ws)
-      } else if (m.type === 'note-delete' || m.type === 'ref-delete') {
+      } else if (m.type === 'note-delete' || m.type === 'ref-delete' || m.type === 'tray-delete') {
         const id = String(m.id || '')
-        ;(m.type === 'note-delete' ? q.deleteNote : q.deleteRef).run(roomId, id)
+        const del = { 'note-delete': q.deleteNote, 'ref-delete': q.deleteRef, 'tray-delete': q.deleteTray }[m.type]
+        del.run(roomId, id)
         broadcast(roomId, { type: m.type, client, id }, ws)
       }
     }
@@ -444,23 +482,6 @@ function createApi(dbFile) {
     const parts = url.pathname.slice(5).split('/').filter(Boolean)
 
     try {
-      // /api/image?url=... fetches a remote image server side, avoiding CORS-tainted canvases.
-      if (parts[0] === 'image' && req.method === 'GET') {
-        const target = url.searchParams.get('url') || ''
-        if (!/^https?:\/\//i.test(target)) return send(res, 400, { error: 'bad url' })
-        const r = await fetch(target, {
-          redirect: 'follow',
-          signal: AbortSignal.timeout(15000),
-          headers: { 'User-Agent': 'Mozilla/5.0 (jigsaw image fetch)', Accept: 'image/*' },
-        })
-        const type = r.headers.get('content-type') || ''
-        if (!r.ok || !type.startsWith('image/')) return send(res, 400, { error: 'not an image' })
-        const buf = Buffer.from(await r.arrayBuffer())
-        if (buf.length > 40 * 1024 * 1024) return send(res, 400, { error: 'too large' })
-        res.setHeader('Content-Type', type)
-        return res.end(buf)
-      }
-
       // /api/lan: where phones on the same network can reach this server.
       if (parts[0] === 'lan' && req.method === 'GET') return send(res, 200, { address: lanAddress() })
 
@@ -617,6 +638,7 @@ function createApi(dbFile) {
             pieces: q.pieces.all(id),
             notes: q.notes.all(id),
             refs: q.refs.all(id),
+            trays: q.trays.all(id).map(trayOut),
             times: q.times.all(id),
             seen: Object.fromEntries(q.seen.all(id).map((s) => [s.user, s.seen])),
             online: online(id),
@@ -634,6 +656,7 @@ function createApi(dbFile) {
             q.deletePieces.run(id)
             q.deleteNotes.run(id)
             q.deleteRefs.run(id)
+            q.deleteTrays.run(id)
             q.deleteTimes.run(id)
             q.deleteMembers.run(id)
             q.deleteRoom.run(id)
