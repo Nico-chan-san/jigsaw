@@ -8,7 +8,7 @@
   --muted: rgba(10, 10, 10, 0.45);
   --line: rgba(10, 10, 10, 0.1);
   --hover: rgba(10, 10, 10, 0.05);
-  --panel: rgba(250, 250, 250, 0.86);
+  --panel: rgba(250, 250, 250, 0.96);
   --canvas: #f0f0f0;
   --dot: rgba(0, 0, 0, 0.13);
   --shadow: rgba(0, 0, 0, 0.4);
@@ -24,7 +24,7 @@
     --muted: rgba(245, 245, 245, 0.45);
     --line: rgba(245, 245, 245, 0.12);
     --hover: rgba(245, 245, 245, 0.07);
-    --panel: rgba(18, 18, 18, 0.86);
+    --panel: rgba(18, 18, 18, 0.96);
     --canvas: #131313;
     --dot: rgba(255, 255, 255, 0.09);
     --shadow: rgba(0, 0, 0, 0.85);
@@ -47,7 +47,7 @@
   --muted: rgba(245, 245, 245, 0.45);
   --line: rgba(245, 245, 245, 0.12);
   --hover: rgba(245, 245, 245, 0.07);
-  --panel: rgba(18, 18, 18, 0.86);
+  --panel: rgba(18, 18, 18, 0.96);
   --canvas: #131313;
   --dot: rgba(255, 255, 255, 0.09);
   --shadow: rgba(0, 0, 0, 0.85);
@@ -119,8 +119,6 @@ button {
   border: 1px solid var(--line);
   border-radius: 11px;
   background: var(--panel);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
 }
 .float.tl {
   top: 16px;
@@ -837,6 +835,15 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   touch-action: none;
   outline: 0;
 }
+/* The scene under the board and the selection outline over it, placed by the engine. */
+.room canvas.layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  transform-origin: 0 0;
+  will-change: transform;
+}
 /* Other players' cursors: above the notes, below the panels. */
 .room canvas.cursors {
   position: absolute;
@@ -874,8 +881,6 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--panel);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   transform: translateX(calc(-100% - 24px));
   transition: transform 0.22s ease;
   scrollbar-width: thin;
@@ -1306,8 +1311,6 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--panel);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   transform: translateX(calc(100% + 24px));
   transition: transform 0.22s ease;
   scrollbar-width: thin;
@@ -1735,8 +1738,6 @@ button.link:hover {
   border: 1px solid var(--line);
   border-radius: 16px;
   background: var(--panel);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   transform: translateX(-50%);
   transition: transform 0.15s;
   animation: podium-in 0.5s cubic-bezier(0.3, 1.6, 0.5, 1);
