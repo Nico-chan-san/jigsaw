@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
-import { Close, Note as NoteIcon } from './icons.jsx'
+import { Note as NoteIcon } from './icons.jsx'
 import PlaceButton from './PlaceButton.jsx'
 
 // Note size, in units of the jigsaw's piece size.
@@ -8,6 +8,9 @@ const NOTE_W = 2.6
 
 // Live note drags are sent at most this often (ms).
 const LIVE_MS = 33
+
+// Two clicks on a note within this time (ms) start editing it.
+const DOUBLE_MS = 400
 
 // Note text size range, in piece size units. Text is as big as fits, shrinking as it grows.
 const FONT_MAX = 0.8
@@ -32,7 +35,7 @@ function fitText(el, unit) {
   if (!fits(lo)) el.style.overflowWrap = 'anywhere'
 }
 
-function Note({ note, engine, focus, selected, canEdit, author, ensureName, onChange, onSave, onLive, onDelete }) {
+function Note({ note, engine, focus, selected, canEdit, author, ensureName, onChange, onSave, onLive }) {
   const area = useRef(null)
   const saveTimer = useRef(0)
 
@@ -45,7 +48,7 @@ function Note({ note, engine, focus, selected, canEdit, author, ensureName, onCh
     if (area.current) fitText(area.current, unit)
   }, [note.text, unit])
 
-  // Drag anywhere on the note to move it; a click without moving starts editing.
+  // Drag anywhere on the note to move it; a click without moving selects it, a double click edits it.
   // While editing, the text area behaves normally and the note's rim still drags.
   const startMove = (e) => {
     if (e.button !== 0 || e.target.closest('button')) return
@@ -84,9 +87,7 @@ function Note({ note, engine, focus, selected, canEdit, author, ensureName, onCh
       el.removeEventListener('pointerup', up)
       el.removeEventListener('pointercancel', up)
       if (pos) return onSave({ ...note, ...pos })
-      const a = area.current
-      a.focus()
-      a.setSelectionRange(a.value.length, a.value.length)
+      engine.notes?.click(note.id)
     }
     el.addEventListener('pointermove', move)
     el.addEventListener('pointerup', up)
@@ -114,19 +115,12 @@ function Note({ note, engine, focus, selected, canEdit, author, ensureName, onCh
       onPointerLeave={() => engine.showTip(null)}
       onPointerDown={startMove}
     >
-      <button
-        className="note-del"
-        onClick={() => ensureName() && onDelete(note.id)}
-        aria-label="Delete note"
-        title="Delete note"
-      >
-        <Close />
-      </button>
       <textarea
         ref={area}
         readOnly={!canEdit}
         value={note.text}
         onChange={edit}
+        onKeyDown={(e) => e.key === 'Escape' && e.currentTarget.blur()}
         onBlur={() => {
           clearTimeout(saveTimer.current)
           onSave(note)
@@ -144,6 +138,7 @@ export function NotesLayer({ engine, roomId, me, nameOf, initial, busRef, create
   const [focusId, setFocusId] = useState(null)
   const [selected, setSelected] = useState(() => new Set())
   const layer = useRef(null)
+  const lastClick = useRef({})
   const latest = useRef(notes)
   latest.current = notes
   const S = engine.geo.S
@@ -192,11 +187,24 @@ export function NotesLayer({ engine, roomId, me, nameOf, initial, busRef, create
         setNotes((ns) => ns.filter((n) => !gone.has(n.id)))
         for (const id of gone) api.deleteNote(roomId, id)
       },
-      focus: (id) => {
+      // A click selects just this note, a second click soon after edits it.
+      click: (id) => {
+        const now = performance.now()
+        const last = lastClick.current
+        lastClick.current = { id, t: now }
         const a = layer.current?.querySelector(`[data-note="${id}"] textarea`)
-        if (!a) return
-        a.focus()
-        a.setSelectionRange(a.value.length, a.value.length)
+        if (a && last.id === id && now - last.t < DOUBLE_MS) {
+          lastClick.current = {}
+          engine.setSelection(new Set())
+          a.focus()
+          a.setSelectionRange(a.value.length, a.value.length)
+          return
+        }
+        // Leave any note being edited, so Delete removes this one rather than editing its text.
+        if (document.activeElement?.closest?.('[data-note]')) document.activeElement.blur()
+        engine.selectRef(null)
+        engine.selectTray(null)
+        engine.setSelection(new Set(), new Set(), new Set([id]))
       },
     }
     return () => (engine.notes = null)
@@ -251,11 +259,6 @@ export function NotesLayer({ engine, roomId, me, nameOf, initial, busRef, create
   const change = (id, patch) => setNotes((ns) => ns.map((n) => (n.id === id ? { ...n, ...patch } : n)))
   const save = (note) => api.saveNote(roomId, note)
   const live = (note) => api.saveNote(roomId, note, true)
-  const remove = (id) => {
-    setNotes((ns) => ns.filter((n) => n.id !== id))
-    if (engine.selNotes.has(id)) engine.toggleNote(id)
-    api.deleteNote(roomId, id)
-  }
 
   return (
     <div ref={layer} className="notes" style={{ '--u': `${S}px`, '--nw': NOTE_W }}>
@@ -272,7 +275,6 @@ export function NotesLayer({ engine, roomId, me, nameOf, initial, busRef, create
           onChange={change}
           onSave={save}
           onLive={live}
-          onDelete={remove}
         />
       ))}
     </div>

@@ -2,6 +2,9 @@
 
 ## 30 September 2026
 
+- Click a note to select it, double click it to write in it. Notes and images no longer have an x to delete them: select them and press `Delete` or `Backspace`. `Esc` stops writing in a note.
+- The resize corners on images are rounder.
+- Fit to screen (`C`) zooms out a little further, leaving more room around the pieces.
 - The buttons at the top middle are in three separate bars instead of one bar with dividers.
 - **Trays** to sort pieces into. Add one with the new button next to the note button, or press `T`. With pieces selected, the new tray is made around them. Drop pieces on a tray to put them in it (everything you're carrying, when you let go over the tray): it grows and shrinks to fit them. Drag a tray to move it with its pieces. Click a tray to select it: `Space` and `G` then work on its pieces, and `Delete` removes the tray (the pieces stay). Turning or sorting a selection leaves the pieces in trays where they are. Each tray gets a random colour.
 - Pieces click into place with a sound and a little burst where they join, for everyone's pieces. Other players' clicks are quieter. Turn the sound off with **Sounds** in the settings menu.

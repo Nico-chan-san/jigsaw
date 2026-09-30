@@ -42,7 +42,6 @@ const LIFT_MAX = 3000
 const OUTLINE_PATHS = 120
 // Screen-space size of reference image handles.
 const HANDLE = 7
-const DEL_R = 11
 // Cursor updates are throttled to this interval (ms); idle cursors vanish after CURSOR_IDLE.
 const CURSOR_MS = 50
 const CURSOR_IDLE = 20000
@@ -534,7 +533,7 @@ export class Engine {
   }
 
   fit(animate = true) {
-    this.frame(this.bbox(this.order), 0.9, animate)
+    this.frame(this.bbox(this.order), 0.82, animate)
   }
 
   saveCam() {
@@ -780,11 +779,8 @@ export class Engine {
     this.carry = null
     clearTimeout(this.carryTimer)
     if (!c) return
-    // A click on a selected note without moving edits it instead.
-    if (!c.moved && c.note) {
-      this.setSelection(new Set())
-      return this.notes?.focus(c.note)
-    }
+    // A click on a selected note without moving selects just that note.
+    if (!c.moved && c.note) return this.notes?.click(c.note)
     if (!c.at) return
     const { refs, notes, trays } = this.carryAt(...c.at)
     for (const p of refs) {
@@ -1244,7 +1240,6 @@ export class Engine {
     if (i >= 0) return 'grab'
     if (th) return 'move'
     if (!rh) return ''
-    if (rh.mode === 'del') return 'pointer'
     if (rh.mode === 'resize') return rh.cx === rh.cy ? 'nwse-resize' : 'nesw-resize'
     return 'move'
   }
@@ -1928,20 +1923,11 @@ export class Engine {
     ]
   }
 
-  // Screen-space center of a selected image's delete button, inside its top right corner, clear of
-  // the resize handle there.
-  refDelAt(ref) {
-    const [, y0, x1] = this.refRect(ref)
-    return [x1 - DEL_R - 8, y0 + DEL_R + 8]
-  }
-
   // The selected image's handles win over everything; otherwise the topmost image under the point.
   refHit(sx, sy) {
     const sel = this.refs.find((r) => r.id === this.refSel)
     if (sel) {
       const [x0, y0, x1, y1] = this.refRect(sel)
-      const [dx, dy] = this.refDelAt(sel)
-      if (Math.hypot(sx - dx, sy - dy) <= DEL_R + 2) return { ref: sel, mode: 'del' }
       for (const cx of [0, 1]) {
         for (const cy of [0, 1]) {
           const hx = cx ? x1 : x0
@@ -1959,7 +1945,6 @@ export class Engine {
 
   startRefDrag(rh, pointer, wx, wy) {
     const ref = rh.ref
-    if (rh.mode === 'del') return this.removeRef(ref.id)
     if (this.guard && !this.guard()) return
     this.selectRef(ref.id)
     if (this.selCount) this.setSelection(new Set())
@@ -2765,29 +2750,11 @@ export class Engine {
         [x0, y1],
         [x1, y1],
       ]) {
-        ctx.fillRect(hx - HANDLE / 2 - 1, hy - HANDLE / 2 - 1, HANDLE + 2, HANDLE + 2)
-        ctx.strokeRect(hx - HANDLE / 2 - 1, hy - HANDLE / 2 - 1, HANDLE + 2, HANDLE + 2)
+        ctx.beginPath()
+        ctx.roundRect(hx - HANDLE / 2 - 1, hy - HANDLE / 2 - 1, HANDLE + 2, HANDLE + 2, 3)
+        ctx.fill()
+        ctx.stroke()
       }
-      const [cx, cy] = this.refDelAt(sel)
-      ctx.beginPath()
-      ctx.arc(cx, cy, DEL_R, 0, Math.PI * 2)
-      ctx.fillStyle = this.colors.line || '#000'
-      ctx.fill()
-      // A ring in the table color keeps it apart from an image of the same shade underneath.
-      ctx.lineWidth = 1.5
-      ctx.strokeStyle = this.colors.bg
-      ctx.stroke()
-      const q = DEL_R * 0.38
-      ctx.beginPath()
-      ctx.moveTo(cx - q, cy - q)
-      ctx.lineTo(cx + q, cy + q)
-      ctx.moveTo(cx + q, cy - q)
-      ctx.lineTo(cx - q, cy + q)
-      ctx.lineWidth = 1.6
-      ctx.lineCap = 'round'
-      ctx.strokeStyle = this.colors.bg
-      ctx.stroke()
-      ctx.lineCap = 'butt'
     }
     this.drawPops()
     this.drawCursors()

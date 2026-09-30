@@ -1307,38 +1307,9 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   outline: calc(var(--u) * 0.04) solid var(--sel);
   outline-offset: calc(var(--u) * 0.02);
 }
-.note-del {
-  position: absolute;
-  top: calc(var(--u) * 0.05);
-  right: calc(var(--u) * 0.05);
-  z-index: 1;
-  display: grid;
-  place-items: center;
-  width: calc(var(--u) * 0.26);
-  height: calc(var(--u) * 0.26);
-  padding: 0;
-  border: 0;
-  border-radius: calc(var(--u) * 0.05);
-  background: transparent;
-  color: rgba(0, 0, 0, 0.45);
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-.note-del:hover {
-  background: rgba(0, 0, 0, 0.08);
-  color: #000;
-}
-.note-del svg {
-  width: 70%;
-  height: 70%;
-}
-.note:hover .note-del,
-.note:focus-within .note-del {
-  opacity: 1;
-}
 .note textarea {
   height: calc(var(--u) * 2.2);
-  padding: calc(var(--u) * 0.06) calc(var(--u) * 0.2) calc(var(--u) * 0.06) calc(var(--u) * 0.06);
+  padding: calc(var(--u) * 0.06);
   cursor: grab;
   border: 0;
   outline: 0;
@@ -1349,7 +1320,7 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   line-height: 1.25;
   overflow: hidden;
   resize: none;
-  /* Presses go to the note (to drag it) until it is being edited; a tap starts editing. */
+  /* Presses go to the note (to drag or select it) until it is being edited; a double tap starts editing. */
   pointer-events: none;
   -webkit-user-select: none;
   user-select: none;
@@ -1358,15 +1329,6 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   pointer-events: auto;
   -webkit-user-select: text;
   user-select: text;
-}
-/* Without hover the delete button is invisible, so it only takes taps while the note is edited. */
-@media (hover: none) {
-  .note-del {
-    pointer-events: none;
-  }
-  .note:focus-within .note-del {
-    pointer-events: auto;
-  }
 }
 .note-ghost {
   position: fixed;

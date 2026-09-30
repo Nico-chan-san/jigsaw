@@ -11,6 +11,7 @@ const SECTIONS = [
       [<Key key="lt">Drag the table</Key>, 'Select'],
       [<Key key="tr">Drag a tray</Key>, 'Move it, with the pieces in it'],
       [<Key key="tc">Click a tray</Key>, 'Select it: space, G and Delete then work on it'],
+      [<Key key="nc">Double click a note</Key>, 'Write in it (a single click selects it)'],
       [<Key key="r">Right drag</Key>, 'Pan'],
       [<Key key="rc">Right click while dragging</Key>, 'Rotate held pieces'],
       [<Key key="w">Scroll</Key>, 'Zoom'],
