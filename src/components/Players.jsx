@@ -21,8 +21,17 @@ export function rankPlayers({ stats, times, notes, nameOf }) {
   )
 }
 
-// owner is the id of the player who made the jigsaw, marked with a crown.
-export default function Players({ open, stats, times, notes, me, owner, nameOf }) {
+// "Currently playing", or when they were last in this jigsaw (if known).
+function lastPlayed(id, online, seen) {
+  if (online.has(id)) return 'Currently playing'
+  if (!seen[id]) return ''
+  const when = new Date(seen[id]).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  return `Last played ${when}`
+}
+
+// owner is the id of the player who made the jigsaw, marked with a crown. online is a Set of the
+// player ids here now, seen when the others were last here (ms by id).
+export default function Players({ open, stats, times, notes, me, owner, nameOf, online, seen }) {
   const list = rankPlayers({ stats, times, notes, nameOf })
 
   return (
@@ -31,7 +40,12 @@ export default function Players({ open, stats, times, notes, me, owner, nameOf }
       <ol>
         {list.map((p) => (
           <li key={p.id} className={p.id === me ? 'me' : ''}>
-            <span className="pname" title={p.id === owner ? `${p.name}, made this jigsaw` : p.name}>
+            <span
+              className="pname"
+              title={[p.id === owner ? `${p.name}, made this jigsaw` : p.name, lastPlayed(p.id, online, seen)]
+                .filter(Boolean)
+                .join('\n')}
+            >
               {p.id === owner && (
                 <span className="pcreator" title={`${p.name} created this room`}>
                   <Crown />

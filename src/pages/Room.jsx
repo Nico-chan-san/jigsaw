@@ -126,6 +126,9 @@ export default function Room({ id }) {
   const [times, setTimes] = useState({})
   const [notes, setNotes] = useState([])
   const [refs, setRefs] = useState([])
+  // Player ids in the room right now, and when the others were last here.
+  const [online, setOnline] = useState(() => new Set())
+  const [seen, setSeen] = useState({})
   const [players, setPlayers] = useState(() => store.get('players') === '1')
   // Shown automatically the first time this player opens each jigsaw.
   const [help, setHelp] = useState(() => !store.get(`help:${id}`))
@@ -192,6 +195,8 @@ export default function Room({ id }) {
           },
         })
         learn(room.players)
+        setOnline(new Set(room.online || []))
+        setSeen(room.seen || {})
         eng.setColors(readColors())
         setGroups(eng.groups())
         setRefs(eng.refs.map((r) => ({ id: r.id, author: r.author })))
@@ -211,6 +216,9 @@ export default function Room({ id }) {
             else if (msg.type === 'player') {
               learn([msg.player])
               eng.invalidate()
+            } else if (msg.type === 'presence') {
+              setOnline(new Set(msg.online || []))
+              setSeen((s) => ({ ...s, ...msg.seen }))
             } else if (msg.type === 'time') timeBus.current?.(msg)
             else if (msg.type === 'note' || msg.type === 'note-delete') noteBus.current?.(msg)
             else if (msg.type === 'react') reactBus.current?.(msg)
@@ -451,7 +459,7 @@ export default function Room({ id }) {
       {engine && (
         <Sidebar engine={engine} roomId={id} groups={groups} notes={notes} refs={refs} open={side} ready={ready} nameOf={nameOf} />
       )}
-      {engine && <Players open={players} stats={stats} times={times} notes={notes} me={playerId} owner={data?.owner} nameOf={nameOf} />}
+      {engine && <Players open={players} stats={stats} times={times} notes={notes} me={playerId} owner={data?.owner} nameOf={nameOf} online={online} seen={seen} />}
     </div>
   )
 }

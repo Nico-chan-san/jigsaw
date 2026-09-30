@@ -197,9 +197,14 @@ function createApi(dbFile) {
     deleteNotes: db.prepare('DELETE FROM notes WHERE room_id = ?'),
     times: db.prepare('SELECT user, seconds FROM times WHERE room_id = ?'),
     addTime: db.prepare(`
-      INSERT INTO times (room_id, user, seconds) VALUES (?, ?, ?)
-      ON CONFLICT (room_id, user) DO UPDATE SET seconds = seconds + excluded.seconds
+      INSERT INTO times (room_id, user, seconds, seen) VALUES (?, ?, ?, ?)
+      ON CONFLICT (room_id, user) DO UPDATE SET seconds = seconds + excluded.seconds, seen = excluded.seen
       RETURNING seconds`),
+    // When each player was last in a room, for "last played".
+    seen: db.prepare('SELECT user, seen FROM times WHERE room_id = ? AND seen > 0'),
+    setSeen: db.prepare(`
+      INSERT INTO times (room_id, user, seen) VALUES (?, ?, ?)
+      ON CONFLICT (room_id, user) DO UPDATE SET seen = excluded.seen`),
     deleteTimes: db.prepare('DELETE FROM times WHERE room_id = ?'),
     refs: db.prepare('SELECT id, x, y, w, author, created FROM refs WHERE room_id = ? ORDER BY created'),
     upsertRef: db.prepare(`
@@ -309,6 +314,22 @@ function createApi(dbFile) {
     for (const ws of set) if (ws !== except) ws.send(data)
   }
 
+  // Who is in a room right now, by player id.
+  function online(roomId) {
+    const ids = new Set()
+    for (const ws of sockets.get(roomId) || []) if (ws.player) ids.add(ws.player.id)
+    return [...ids]
+  }
+  // Tells the room who is here, and when anyone who just left was last seen.
+  function presence(roomId, left) {
+    const seen = {}
+    if (left) {
+      seen[left.id] = Date.now()
+      q.setSeen.run(roomId, left.id, seen[left.id])
+    }
+    broadcast(roomId, { type: 'presence', online: online(roomId), seen })
+  }
+
   // Only real player ids are stored as authors; anything else (such as a name sent by a page from
   // before players) is dropped.
   const playerId = (v) => (v && q.player.get(String(v)) ? String(v) : null)
@@ -373,6 +394,7 @@ function createApi(dbFile) {
     const player = q.player.get(url.searchParams.get('player') || '')
     ws.player = player || null
     if (player) broadcast(roomId, { type: 'player', client, player: { id: player.id, name: player.name } }, ws)
+    presence(roomId)
     ws.handler = (text) => {
       try {
         handle(JSON.parse(text))
@@ -382,8 +404,10 @@ function createApi(dbFile) {
       // The player on this socket logged in, out or signed up.
       if (m.type === 'hello') {
         const p = q.player.get(String(m.player || ''))
+        const before = ws.player
         ws.player = p || null
         if (p) broadcast(roomId, { type: 'player', client, player: { id: p.id, name: p.name } }, ws)
+        if (before?.id !== p?.id) presence(roomId, before)
       } else if (m.type === 'moves' && Array.isArray(m.pieces)) {
         saveMoves(roomId, m.pieces)
         broadcast(roomId, { type: 'moves', client, pieces: m.pieces }, ws)
@@ -403,6 +427,7 @@ function createApi(dbFile) {
     ws.onclose = () => {
       sockets.get(roomId)?.delete(ws)
       broadcast(roomId, { type: 'gone', client })
+      presence(roomId, ws.player)
     }
   }
 
@@ -586,6 +611,8 @@ function createApi(dbFile) {
             notes: q.notes.all(id),
             refs: q.refs.all(id),
             times: q.times.all(id),
+            seen: Object.fromEntries(q.seen.all(id).map((s) => [s.user, s.seen])),
+            online: online(id),
             players: [...players.values()],
           })
         }
@@ -638,7 +665,7 @@ function createApi(dbFile) {
         const user = playerId(b.user)
         const secs = Math.max(0, Math.min(300, Math.round(+b.seconds || 0)))
         if (!user || !secs) return send(res, 200, { ok: true })
-        const { seconds } = q.addTime.get(id, user, secs)
+        const { seconds } = q.addTime.get(id, user, secs, Date.now())
         broadcast(id, { type: 'time', client: b.client, user, seconds })
         return send(res, 200, { seconds })
       }
