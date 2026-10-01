@@ -1075,14 +1075,18 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   touch-action: none;
   outline: 0;
 }
-/* The scene under the board and the selection outline over it, placed by the engine. */
-.room canvas.layer {
+/* The table, drawn with WebGPU under the board. */
+.room canvas.gpu {
   position: absolute;
-  top: 0;
-  left: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
-  transform-origin: 0 0;
-  will-change: transform;
+}
+.gpu-error {
+  max-width: 420px;
+  padding: 0 16px;
+  text-align: center;
 }
 /* Other players' cursors: above the notes, below the panels. */
 .room canvas.cursors {

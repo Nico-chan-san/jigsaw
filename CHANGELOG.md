@@ -7,8 +7,8 @@
 - Round, Square and Arrow are no longer offered for new jigsaws. Jigsaws that already have them keep their pieces.
 - The shape list in the new jigsaw form stays open when you pick a shape, so you can try them one after another. Click outside it or press `Esc` to close it.
 - Pieces joining now make a soft wooden clack. It sounds the same for every join, the last one too.
-- Turning a big group of joined pieces is smooth now, on the table or while carrying it, however many pieces it has.
-- Zooming is smoother in Firefox and Zen, also with a big jigsaw selected or zoomed far in on a piece.
+- The table is now drawn by your graphics card (WebGPU), so zooming, panning, turning and carrying stay smooth in every browser, however big the jigsaw. Your browser needs WebGPU for this; if it can't start, the jigsaw tells you so instead of loading.
+- The table is much bigger: four times as wide and tall, with lots more room to lay pieces out, and you can zoom out further to see it.
 
 ## 30 September 2026
 

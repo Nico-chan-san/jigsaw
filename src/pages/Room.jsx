@@ -132,6 +132,8 @@ export default function Room({ id }) {
   const notch = useNotch()
   const idle = useIdle()
   const [error, setError] = useState(false)
+  // Why the table can't be drawn here (WebGPU didn't start), shown instead of it.
+  const [gpuError, setGpuError] = useState(null)
   // View mode: dragging with the left button (or a finger) moves the table, never pieces or notes.
   const [panMode, setPanMode] = useState(() => store.get('panMode') === '1')
   const [podium, setPodium] = useState(false)
@@ -191,6 +193,13 @@ export default function Room({ id }) {
             setParty(true)
           },
         })
+        try {
+          await eng.ready
+        } catch (err) {
+          if (!dead) setGpuError(String(err?.message || err))
+          return
+        }
+        if (dead) return
         learn(room.players)
         setOnline(new Set(room.online || []))
         setSeen(room.seen || {})
@@ -455,7 +464,14 @@ export default function Room({ id }) {
       <div ref={tip} className="tip" />
       {!engine && (
         <div className="center">
-          <span className="spin" />
+          {gpuError ? (
+            <p className="gpu-error">
+              This browser can't draw the jigsaw: it needs WebGPU, which didn't start here ({gpuError}). Try another browser,
+              or turn on hardware acceleration in this one.
+            </p>
+          ) : (
+            <span className="spin" />
+          )}
         </div>
       )}
       {engine && (

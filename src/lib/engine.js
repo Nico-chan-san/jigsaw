@@ -1,6 +1,7 @@
-// Imperative canvas engine: rendering, camera, dragging, rotation and snapping.
+// Imperative canvas engine: rendering (with WebGPU, see gpu.js), camera, dragging, rotation and snapping.
 import { buildPuzzle, outlinePath, pack, packExtent, pile, scatter, unitCells } from './geometry.js'
-import { drawBack, drawFront, levels, spriteSize } from './sprites.js'
+import { drawBack, drawFront, levels, MIPS, spriteSize } from './sprites.js'
+import { createGpu, PIECE_FLOATS, REF_FLOATS, TRAY_FLOATS } from './gpu.js'
 
 const Q = Math.PI / 2
 const COS = [1, 0, -1, 0]
@@ -34,28 +35,15 @@ export const TRAY_COLORS = {
   purple: '#8e4ec6',
   gray: '#8b8d98',
 }
+// How far the table reaches from the middle of the pieces on every side, in jigsaw sizes.
+const TABLE = 10
 const CLICK_PX = 5
 const CLICK_MS = 400
-// Largest side of the cached sprite for a lifted selection.
-const LIFT_MAX = 3000
-// Modules of at least this many pieces turning on the table are drawn as one picture, see turnSprite().
-const TURN_SPRITE = 8
-// Above this many pieces a selection outline is built from piece silhouettes instead of stroked paths.
-const OUTLINE_PATHS = 120
 // Screen-space size of reference image handles.
 const HANDLE = 7
 // Cursor updates are throttled to this interval (ms); idle cursors vanish after CURSOR_IDLE.
 const CURSOR_MS = 50
 const CURSOR_IDLE = 20000
-// The stacked layers (see syncLayer) are drawn this much bigger than the view on every side, as a
-// share of the view's short side, so panning a little doesn't redraw them.
-const OVERSCAN = 0.25
-// While zooming, the layers are scaled instead of redrawn until the zoom has rested this long (ms)
-// or they have been scaled up this much.
-const ZOOM_SETTLE = 150
-const ZOOM_STRETCH = 1.25
-// While zooming, the layers that do get redrawn get at most this many pixels per CSS pixel.
-const ZOOM_DPR = 1
 // Canvases are never drawn finer than this many pixels per CSS pixel.
 const MAX_DPR = 2
 const makeCanvas = (w, h) => {
@@ -64,6 +52,27 @@ const makeCanvas = (w, h) => {
   c.height = h
   return c
 }
+// A CSS colour as [r, g, b, a], each 0 to 1, read back from a canvas so any colour the browser
+// knows works.
+const colors = new Map()
+let colorCtx = null
+const rgba = (css) => {
+  let c = colors.get(css)
+  if (!c) {
+    colorCtx ??= makeCanvas(1, 1).getContext('2d', { willReadFrequently: true })
+    colorCtx.clearRect(0, 0, 1, 1)
+    colorCtx.fillStyle = '#000'
+    colorCtx.fillStyle = css
+    colorCtx.fillRect(0, 0, 1, 1)
+    const [r, g, b, a] = colorCtx.getImageData(0, 0, 1, 1).data
+    colors.set(css, (c = [r / 255, g / 255, b / 255, a / 255]))
+  }
+  return c
+}
+// A colour premultiplied by its alpha, times alpha.
+const pm = ([r, g, b, a], alpha = 1) => [r * a * alpha, g * a * alpha, b * a * alpha, a * alpha]
+// a, or a bigger array if it holds fewer than n numbers.
+const grow = (a, n) => (a.length >= n ? a : new Float32Array(Math.max(n, a.length * 2)))
 // Arrow keys and WASD move the camera, at this many screen pixels per second, speeding up the
 // longer they are held: up to PAN_BOOST times as fast after PAN_RAMP ms.
 const PAN_SPEED = 900
@@ -89,42 +98,19 @@ const cursorColor = (id) => {
 export class Engine {
   constructor(canvas, { room, image, pieces, refs, trays, overlay, user, userName, nameOf, guard, tooltip, send, onStats, onComplete, onRef, onRefDelete, onTray, onTrayDelete, onSnap }) {
     this.canvas = canvas
-    // The board canvas only holds what changes from frame to frame: pieces in motion, the lifted
-    // pieces, the hover outline, image handles and the selection box. The rest of the table (the
-    // scene) sits on a canvas stacked under it and the selection outline on one over it, each
-    // redrawn only when it changes, see syncLayer(). The browser stacks them for free.
+    // The table is drawn with WebGPU on a canvas stacked under the board (see startGpu() and
+    // drawGpu()), the whole of it every frame. The board canvas only holds the small things on
+    // top, drawn in 2D: image handles, the bursts where pieces join and the selection box.
     this.ctx = canvas.getContext('2d')
-    this.sceneL = this.makeLayer(true)
-    this.sceneVer = 0
-    this.selL = this.makeLayer(false)
-    this.selVer = 0
-    canvas.before(this.sceneL.el)
-    canvas.after(this.selL.el)
-    // The camera the board was last drawn for, and a counter of frames drawn.
+    this.gpuEl = document.createElement('canvas')
+    this.gpuEl.className = 'gpu'
+    this.gpu = null
+    // The camera the board was last drawn for.
     this.mv = { x: NaN, y: NaN, z: NaN, w: NaN, h: NaN }
-    this.frameNo = 0
-    this.zoomedAt = 0
-    // Pieces drawn on the board instead of in the scene, see updateActive().
-    this.active = new Set()
-    // The lifted pieces drawn one by one, for their shadow while they can't come from one sprite.
-    // Sized to the board when first needed.
-    this.layer = makeCanvas(0, 0)
-    this.lctx = this.layer.getContext('2d')
-    // The hover outline, sized to the piece.
-    this.hlLayer = makeCanvas(0, 0)
-    this.hlCtx = this.hlLayer.getContext('2d')
     this.hitCtx = makeCanvas(1, 1).getContext('2d')
-    // Silhouettes of the pieces being outlined, sized to them, see outlineMasks().
-    this.maskLayer = makeCanvas(0, 0)
-    this.maskCtx = this.maskLayer.getContext('2d')
     // Other players' cursors go on a separate canvas stacked above the notes.
     this.overlay = overlay
     this.octx = overlay?.getContext('2d')
-    // Low resolution buffer for the lifted pieces' drop shadow, and the blurred shadow of the lift
-    // sprite, kept while neither changes much.
-    this.shadowLayer = makeCanvas(0, 0)
-    this.shCtx = this.shadowLayer.getContext('2d')
-    this.liftShadow = null
     this.room = room
     this.image = image
     // This player's id (stored on what they do) and name (shown on their cursor).
@@ -167,10 +153,9 @@ export class Engine {
     // progress: i -> start time.
     this.f = new Uint8Array(n)
     this.backs = new Array(n)
-    // Plain filled outlines of the pieces, made the first time a piece is outlined.
-    this.masks = new Array(n)
     this.flips = new Map()
-    // Pieces turned in place on the table, still animating: i -> { cx, cy, a } (a in radians, decays to 0).
+    // Pieces turned in place on the table, still animating: i -> { cx, cy, a } (a in radians, decays to
+    // 0), one object shared by all the pieces of a module.
     this.turns = new Map()
     this.hl = null
     // Selected pieces (always whole groups), reference images and notes, by id.
@@ -236,7 +221,7 @@ export class Engine {
     this.refImg.getContext('2d').drawImage(image, 0, 0, this.refImg.width, this.refImg.height)
 
     const b = this.bbox(this.order)
-    const ext = Math.max(b.x1 - b.x0, b.y1 - b.y0, room.width, room.height) * 2.5
+    const ext = Math.max(b.x1 - b.x0, b.y1 - b.y0, room.width, room.height) * TABLE
     const mx = (b.x0 + b.x1) / 2
     const my = (b.y0 + b.y1) / 2
     this.bounds = { x0: mx - ext, y0: my - ext, x1: mx + ext, y1: my + ext }
@@ -273,6 +258,57 @@ export class Engine {
     const saved = this.loadCam()
     if (saved) this.cam = saved
     else this.fit(false)
+    // Resolves once the table can be drawn; rejects if WebGPU can't be started.
+    this.ready = this.startGpu()
+  }
+
+  // Starts WebGPU, puts every sprite made so far in its atlas and shows the GPU canvas. Sprites made
+  // later go there as they come, see setSprite(). Backs get cells after the fronts' as needed: at
+  // most one per piece in hardcore mode, where pieces lie face down.
+  async startGpu() {
+    const backs = this.room.annoying ? this.n : this.f.reduce((a, f) => a + f, 0)
+    const [spw, sph] = spriteSize(this.geo, this.margin, this.spriteScale)
+    const gpu = await createGpu(this.gpuEl, { cells: this.n + backs, spw, sph, levels: MIPS + 1 })
+    if (this.raf === -1) return gpu.destroy()
+    this.gpu = gpu
+    this.backCells = new Map()
+    this.backCap = this.n + backs
+    // Per frame: the pieces' instances (still, active, lifted, then the outlined ones again), trays and images.
+    this.gi = new Float32Array((2 * this.n + 8) * PIECE_FLOATS)
+    this.giu = new Uint32Array(this.gi.buffer)
+    this.gTrays = new Float32Array(0)
+    this.gRefs = new Float32Array(0)
+    gpu.onLost = (why) => console.error('WebGPU device lost:', why)
+    gpu.setRefImage(this.refImg)
+    this.sprites.forEach((lv, i) => lv && gpu.upload(i, lv))
+    this.backs.forEach((lv, i) => lv && this.uploadBack(i, lv))
+    this.canvas.before(this.gpuEl)
+    this.resize()
+  }
+
+  // Puts a back sprite in the atlas, in the next free back cell.
+  uploadBack(i, lv) {
+    if (!this.gpu) return
+    let c = this.backCells.get(i)
+    if (c === undefined) {
+      if (this.backCells.size >= this.backCap - this.n) return
+      c = this.n + this.backCells.size
+      this.backCells.set(i, c)
+    }
+    this.gpu.upload(c, lv)
+  }
+
+  // A piece's sprite levels (front, or back), kept and sent to the GPU.
+  setSprite(i, lv, back = false) {
+    if (back) {
+      if (this.backs[i]) return
+      this.backs[i] = lv
+      this.uploadBack(i, lv)
+      return
+    }
+    if (!this.sprites[i]) this.built++
+    this.sprites[i] = lv
+    this.gpu?.upload(i, lv)
   }
 
   // ---- lifecycle ----------------------------------------------------------
@@ -286,7 +322,7 @@ export class Engine {
       wheel: (e) => this.onWheel(e),
       key: (e) => this.onKey(e),
       keyup: (e) => {
-        if (this.panKeys.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key)) this.invalidate(false)
+        if (this.panKeys.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key)) this.invalidate()
       },
       stopPan: () => this.panKeys.clear(),
       leave: () => {
@@ -363,10 +399,9 @@ export class Engine {
     this.raf = -1
     this.spriteHost?.terminate()
     this.spriteWorker = this.spriteHost = null
-    clearTimeout(this.zoomTimer)
-    clearTimeout(this.heldTimer)
-    this.sceneL.el.remove()
-    this.selL.el.remove()
+    this.gpu?.destroy()
+    this.gpu = null
+    this.gpuEl.remove()
   }
 
   resize() {
@@ -374,100 +409,13 @@ export class Engine {
     this.dpr = Math.min(MAX_DPR, window.devicePixelRatio || 1)
     this.vw = Math.max(1, rect.width)
     this.vh = Math.max(1, rect.height)
-    for (const c of [this.canvas, this.overlay]) {
+    for (const c of [this.canvas, this.gpuEl, this.overlay]) {
       if (!c) continue
       c.width = Math.round(this.vw * this.dpr)
       c.height = Math.round(this.vh * this.dpr)
     }
-    // Only drawn into while needed, and sized then.
-    this.layer.width = this.layer.height = 0
-    this.liftBox = null
+    this.dirty = true
     this.invalidate()
-  }
-
-  // A canvas stacked with the board, holding a picture that is slow to draw, see syncLayer().
-  // The scene is opaque, which makes it cheaper to draw and stack.
-  makeLayer(opaque) {
-    const el = document.createElement('canvas')
-    el.className = 'layer'
-    el.style.visibility = 'hidden'
-    return { el, ctx: el.getContext('2d', { alpha: !opaque }), v: null, key: null, tf: '', hidden: true }
-  }
-
-  // Brings a stacked layer up to date with the camera. A layer is drawn for one camera, a margin
-  // bigger than the view on every side, and panning or zooming just moves and scales the element
-  // (the browser does that without redrawing anything) until the picture no longer covers the
-  // view, gets scaled up too far or the zoom has come to rest. Only then, or when key changes, is
-  // it drawn again, with draw(ctx, view). A view is { x, y, z, w, h }: the world point at its
-  // middle, the zoom and its size in CSS pixels.
-  //
-  // While the zoom changes, a layer that has to be redrawn is drawn at ZOOM_DPR pixels per CSS pixel
-  // at most, and sharp again once the zoom rests: browsers that draw canvases on the CPU (Firefox)
-  // can't redraw a whole screen of pieces at full resolution several times a second. A lazy layer
-  // (the selection outline) isn't redrawn at all while the zoom changes, only scaled, even if it
-  // no longer covers the view.
-  syncLayer(L, key, draw, lazy = false) {
-    const { cam, vw, vh } = this
-    const zooming = performance.now() - this.zoomedAt <= ZOOM_SETTLE
-    let v = L.v
-    let k = 1
-    let ax = 0
-    let ay = 0
-    const place = () => {
-      k = cam.z / v.z
-      ax = vw / 2 - (v.w / 2) * k + (v.x - cam.x) * cam.z
-      ay = vh / 2 - (v.h / 2) * k + (v.y - cam.y) * cam.z
-    }
-    let stale = !v || L.key !== key || (!zooming && v.dpr !== this.dpr)
-    if (!stale) {
-      place()
-      const covers = ax <= 0.5 && ay <= 0.5 && ax + v.w * k >= vw - 0.5 && ay + v.h * k >= vh - 0.5
-      stale = zooming ? !lazy && (!covers || k > ZOOM_STRETCH) : k !== 1 || !covers
-    }
-    if (stale) {
-      const dpr = zooming ? Math.min(this.dpr, ZOOM_DPR) : this.dpr
-      const m = Math.round(Math.min(vw, vh) * OVERSCAN)
-      const W = Math.ceil((vw + 2 * m) * dpr)
-      const H = Math.ceil((vh + 2 * m) * dpr)
-      if (L.el.width !== W || L.el.height !== H) {
-        L.el.width = W
-        L.el.height = H
-        L.el.style.width = `${W / dpr}px`
-        L.el.style.height = `${H / dpr}px`
-      }
-      v = L.v = { x: cam.x, y: cam.y, z: cam.z, w: W / dpr, h: H / dpr, dpr }
-      L.key = key
-      // Everything drawing a layer reads this.dpr.
-      const full = this.dpr
-      this.dpr = dpr
-      try {
-        draw(L.ctx, v)
-      } finally {
-        this.dpr = full
-      }
-      place()
-    }
-    // Unscaled, the layer sits on whole device pixels so it stays sharp.
-    if (k === 1) {
-      ax = Math.round(ax * v.dpr) / v.dpr
-      ay = Math.round(ay * v.dpr) / v.dpr
-    }
-    const tf = `translate(${ax}px, ${ay}px) scale(${k})`
-    if (tf !== L.tf) {
-      L.tf = tf
-      L.el.style.transform = tf
-    }
-    if (L.hidden) {
-      L.hidden = false
-      L.el.style.visibility = ''
-    }
-  }
-
-  hideLayer(L) {
-    if (L.hidden) return
-    L.hidden = true
-    L.v = null
-    L.el.style.visibility = 'hidden'
   }
 
   setColors(colors) {
@@ -475,9 +423,8 @@ export class Engine {
     this.invalidate()
   }
 
-  // scene = false means only the lifted pieces changed, so the cached scene stays valid.
-  invalidate(scene = true) {
-    if (scene) this.sceneVer++
+  // Asks for a frame.
+  invalidate() {
     if (!this.raf) this.raf = requestAnimationFrame(() => this.render())
   }
 
@@ -494,7 +441,7 @@ export class Engine {
   addView(fn) {
     this.views.add(fn)
     this.viewsVer++
-    this.invalidate(false)
+    this.invalidate()
     return () => {
       this.views.delete(fn)
       this.viewsVer++
@@ -519,7 +466,7 @@ export class Engine {
     this.cam.x = wx - (sx - this.vw / 2) / this.cam.z
     this.cam.y = wy - (sy - this.vh / 2) / this.cam.z
     this.clampCam()
-    this.invalidate(false)
+    this.invalidate()
   }
 
   // Eases the zoom around the middle of the view. Presses during the animation add up.
@@ -528,7 +475,7 @@ export class Engine {
     const from = a?.zoom ? a.to : this.cam
     const z = Math.min(this.zmax, Math.max(this.zmin, from.z * f))
     this.camAnim = { from: { ...this.cam }, to: { x: from.x, y: from.y, z }, t0: performance.now(), ms: 260, zoom: true }
-    this.invalidate(false)
+    this.invalidate()
   }
 
   bbox(ids, e = Math.max(this.geo.w, this.geo.h) / 2 + this.geo.pad) {
@@ -553,7 +500,7 @@ export class Engine {
     const to = { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2, z }
     if (animate) this.camAnim = { from: { ...this.cam }, to, t0: performance.now(), ms: 550 }
     else this.cam = to
-    this.invalidate(false)
+    this.invalidate()
   }
 
   fit(animate = true) {
@@ -621,7 +568,6 @@ export class Engine {
 
   toTop(set) {
     this.order = this.order.filter((i) => !set.has(i)).concat([...set])
-    this.sceneVer++
   }
 
   // Expands a set of pieces to the whole groups they belong to.
@@ -690,13 +636,10 @@ export class Engine {
   setSelection(set, refs = new Set(), notes = new Set()) {
     const same = (a, b) => a.size === b.size && [...a].every((v) => b.has(v))
     this.sel = set
-    this.selVer++
-    // Selected images are outlined in the scene; pieces have their own layer.
-    const sameRefs = same(refs, this.selRefs)
     this.selRefs = refs
     if (!same(notes, this.selNotes)) this.notes?.select(notes)
     this.selNotes = notes
-    this.invalidate(!sameRefs)
+    this.invalidate()
   }
 
   get selCount() {
@@ -788,7 +731,7 @@ export class Engine {
     }
     if (notes.length) this.notes?.move(notes, null)
     this.sendCarry()
-    this.invalidate(!!refs.length || !!trays.length)
+    this.invalidate()
   }
 
   sendCarry(force) {
@@ -847,18 +790,15 @@ export class Engine {
     this.spriteWorker = this.spriteHost = worker
     const stop = () => {
       if (this.spriteWorker === worker) this.spriteWorker = null
-      this.invalidate(false)
+      this.invalidate()
     }
     worker.onmessage = ({ data }) => {
       if (this.spriteWorker !== worker) return
       if (data.kind === 'front') {
-        for (const { i, lv } of data.items) {
-          if (!this.sprites[i]) this.built++
-          this.sprites[i] = lv
-        }
+        for (const { i, lv } of data.items) this.setSprite(i, lv)
         this.invalidate()
       } else if (data.kind === 'back') {
-        for (const { i, lv } of data.items) this.backs[i] ??= lv
+        for (const { i, lv } of data.items) this.setSprite(i, lv, true)
       } else if (data.kind === 'done') {
         this.backQueue = []
         stop()
@@ -879,12 +819,11 @@ export class Engine {
     while (this.buildAt < this.n && performance.now() < until) {
       const i = this.buildAt++
       if (this.sprites[i]) continue
-      this.sprites[i] = levels(this.makeSprite(i), makeCanvas)
-      this.built++
+      this.setSprite(i, levels(this.makeSprite(i), makeCanvas))
     }
     while (this.buildAt >= this.n && this.backQueue.length && performance.now() < until) {
       const i = this.backQueue.pop()
-      this.backs[i] ??= levels(this.makeBack(i), makeCanvas)
+      if (!this.backs[i]) this.setSprite(i, levels(this.makeBack(i), makeCanvas), true)
     }
   }
 
@@ -895,16 +834,6 @@ export class Engine {
   makeSprite(i) {
     const c = makeCanvas(...spriteSize(this.geo, this.margin, this.spriteScale))
     drawFront(c.getContext('2d'), this.spriteOpts(), this.geo.pieces[i], this.paths[i])
-    return c
-  }
-
-  // The piece's shape filled solid, with no shadow, at the same size as its sprite.
-  makeMask(i) {
-    const sc = this.spriteScale
-    const c = makeCanvas(...spriteSize(this.geo, this.margin, sc))
-    const ctx = c.getContext('2d')
-    ctx.setTransform(sc, 0, 0, sc, c.width / 2, c.height / 2)
-    ctx.fill(this.paths[i])
     return c
   }
 
@@ -931,18 +860,9 @@ export class Engine {
     }
     this.fsx = sx
     this.flift = lift
-    return sx >= 0 ? this.sprites[i] : (this.backs[i] ??= levels(this.makeBack(i), makeCanvas))
-  }
-
-  // The smallest of a sprite's levels that still has at least `need` pixels per world unit.
-  pick(lv, need) {
-    let k = 0
-    let s = this.spriteScale / 2
-    while (k + 1 < lv.length && s >= need) {
-      k++
-      s /= 2
-    }
-    return lv[k]
+    if (sx >= 0) return this.sprites[i]
+    if (!this.backs[i]) this.setSprite(i, levels(this.makeBack(i), makeCanvas), true)
+    return this.backs[i]
   }
 
   hit(wx, wy) {
@@ -986,7 +906,7 @@ export class Engine {
       this.marquee = null
       this.refDrag = null
       this.pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), m: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }
-      this.invalidate(false)
+      this.invalidate()
       return
     }
     // Right (or middle) button drags the table, as does any press in view mode.
@@ -1095,7 +1015,7 @@ export class Engine {
       if (Math.hypot(sx - d.sx0, sy - d.sy0) > CLICK_PX) d.moved = true
       this.updatePivot()
       this.sendLive()
-      this.invalidate(false)
+      this.invalidate()
       return
     }
     if (this.pinch && this.pointers.size === 2) {
@@ -1114,7 +1034,7 @@ export class Engine {
       this.pan.sx = sx
       this.pan.sy = sy
       this.clampCam()
-      this.invalidate(false)
+      this.invalidate()
       return
     }
     if (this.marquee && e.pointerId === this.marquee.pointer) {
@@ -1147,7 +1067,7 @@ export class Engine {
     }
     if (this.marquee && e.pointerId === this.marquee.pointer) {
       this.marquee = null
-      this.invalidate(false)
+      this.invalidate()
     }
     if (this.refDrag && e.pointerId === this.refDrag.pointer) {
       const { ref } = this.refDrag
@@ -1179,7 +1099,7 @@ export class Engine {
     for (const n of this.notes?.get() || []) if (inside(n.x + n.w / 2, n.y + n.h / 2)) notes.add(n.id)
     // Most moves change nothing but the box itself, which is cheap to draw.
     const same = (a, b) => a.size === b.size && [...a].every((v) => b.has(v))
-    if (same(next, this.sel) && same(refs, this.selRefs) && same(notes, this.selNotes)) return this.invalidate(false)
+    if (same(next, this.sel) && same(refs, this.selRefs) && same(notes, this.selNotes)) return this.invalidate()
     this.setSelection(next, refs, notes)
   }
 
@@ -1220,7 +1140,7 @@ export class Engine {
       e.preventDefault()
       this.camAnim = null
       this.panKeys.add(key)
-      this.invalidate(false)
+      this.invalidate()
       return
     }
     // While holding pieces: space turns them, G gathers the carried groups.
@@ -1284,7 +1204,7 @@ export class Engine {
   setHighlight(hl) {
     if (hl?.key === this.hl?.key) return
     this.hl = hl
-    this.invalidate(false)
+    this.invalidate()
   }
 
   showTip(t) {
@@ -1339,7 +1259,6 @@ export class Engine {
     }
     const keep = this.lift && this.lift.ids.length === ids.length && set.has(this.lift.ids[0])
     this.lift = { ids, set, value: keep ? this.lift.value : 0, target: 1, px: wx, py: wy, angle: 0 }
-    this.buildLiftSprite()
     this.canvas.style.cursor = 'grabbing'
     this.showTip(null)
     this.setHighlight(null)
@@ -1347,42 +1266,6 @@ export class Engine {
     this.send({ type: 'grab', ids, ox: d.ox.map(r2), oy: d.oy.map(r2), r0: d.r0, px: r2(wx), py: r2(wy) })
     this.lastLive = performance.now()
     this.invalidate()
-  }
-
-  // Renders the lifted pieces once into a single canvas, so each frame of a drag
-  // is one drawImage no matter how many pieces are being carried.
-  buildLiftSprite() {
-    const d = this.drag
-    const R = this.radius
-    let x0 = Infinity
-    let y0 = Infinity
-    let x1 = -Infinity
-    let y1 = -Infinity
-    for (let j = 0; j < d.ids.length; j++) {
-      x0 = Math.min(x0, d.ox[j] - R)
-      y0 = Math.min(y0, d.oy[j] - R)
-      x1 = Math.max(x1, d.ox[j] + R)
-      y1 = Math.max(y1, d.oy[j] + R)
-    }
-    const res = Math.min(this.cam.z * this.dpr * 1.05, this.spriteScale, LIFT_MAX / Math.max(x1 - x0, y1 - y0))
-    const c = this.lift.sprite?.c || document.createElement('canvas')
-    c.width = Math.max(1, Math.ceil((x1 - x0) * res))
-    c.height = Math.max(1, Math.ceil((y1 - y0) * res))
-    const ctx = c.getContext('2d')
-    const w = this.spriteW
-    const h = this.spriteH
-    for (let j = 0; j < d.ids.length; j++) {
-      const lv = this.face(d.ids[j], true)
-      if (!lv) continue
-      const sx = this.fsx
-      const a = d.r0[j] * Q
-      const co = Math.cos(a) * res
-      const sn = Math.sin(a) * res
-      ctx.setTransform(co * sx, sn * sx, -sn, co, (d.ox[j] - x0) * res, (d.oy[j] - y0) * res)
-      ctx.drawImage(this.pick(lv, res), -w / 2, -h / 2, w, h)
-    }
-    this.lift.sprite = { c, x0, y0, x1, y1, res, target: res }
-    this.liftShadow = null
   }
 
   updatePivot() {
@@ -1429,10 +1312,9 @@ export class Engine {
     }
     d.spinning = true
     d.moved = true
-    this.buildLiftSprite()
     // Other players get the new offsets as a fresh grab that keeps the current turn.
     this.send({ type: 'grab', ids: d.ids, ox: d.ox.map(r2), oy: d.oy.map(r2), r0: d.r0, px: r2(d.px), py: r2(d.py), k: d.k })
-    this.invalidate(false)
+    this.invalidate()
   }
 
   get packExtent() {
@@ -1474,9 +1356,8 @@ export class Engine {
     })
     d.spinning = true
     d.moved = true
-    this.buildLiftSprite()
     this.send({ type: 'grab', ids: d.ids, ox: d.ox.map(r2), oy: d.oy.map(r2), r0: d.r0, px: r2(d.px), py: r2(d.py), k: d.k })
-    this.invalidate(false)
+    this.invalidate()
   }
 
   // Snaps each module on its own, then eases every piece the snap moved from where it was.
@@ -1525,7 +1406,7 @@ export class Engine {
       const [x, y] = seams[Math.floor(k)]
       this.pops.push({ x, y, t0: t0 + (k / step) * 25, a: Math.random() * Math.PI })
     }
-    this.invalidate(false)
+    this.invalidate()
   }
 
   // Space with a selection: turns each selected module a quarter around its centre, on the table.
@@ -1540,8 +1421,7 @@ export class Engine {
       const b = this.bbox(m, 0)
       const cx = (b.x0 + b.x1) / 2
       const cy = (b.y0 + b.y1) / 2
-      // One turn for the whole module, so a big one can be drawn turning as one picture (see turnSprite).
-      const t = { cx, cy, a: (this.turns.get(m[0])?.a || 0) - dir * Q, ids: m.length >= TURN_SPRITE ? m : null }
+      const t = { cx, cy, a: (this.turns.get(m[0])?.a || 0) - dir * Q }
       for (const i of m) {
         const [rx, ry] = rot(this.x[i] - cx, this.y[i] - cy, dir)
         this.x[i] = cx + rx
@@ -1669,16 +1549,17 @@ export class Engine {
     for (const grp of this.modules(d.ids)) for (const j of this.snap(grp)) changed.add(j)
     this.joined(g0, changed, true)
 
-    // The lift sprite can keep animating the landing if everything moved by the same snap offset.
+    // The landing shrinks the pieces back around the pointer, moved along with them if everything
+    // moved by the same snap offset.
     const l = this.lift
     const sdx = this.x[state[0].i] - state[0].x
     const sdy = this.y[state[0].i] - state[0].y
     const rigid = state.every((p) => Math.abs(this.x[p.i] - p.x - sdx) + Math.abs(this.y[p.i] - p.y - sdy) < 1e-6)
-    if (rigid && l.sprite) {
+    if (rigid) {
       l.px = d.px + sdx
       l.py = d.py + sdy
       l.angle = d.k * Q
-    } else l.sprite = null
+    }
     l.target = 0
 
     this.canvas.style.cursor = ''
@@ -1699,8 +1580,6 @@ export class Engine {
       this.f[k] = 0
       this.flips.set(k, now)
     }
-    // The landing sprite still shows the old side; draw the piece itself so the flip is visible.
-    if (this.lift?.set.has(i)) this.lift.sprite = null
     this.send({ type: 'moves', pieces: cells.map((k) => ({ i: k, x: this.x[k], y: this.y[k], r: this.r[k], g: this.g[k], f: this.f[k] })) })
     this.invalidate()
   }
@@ -1890,7 +1769,6 @@ export class Engine {
     const full = this.trays.filter((t) => t.pieces.length)
     for (const t of full) t.pieces = []
     this.refitTrays(full)
-    this.sceneVer++
     this.commit(layout.map((p) => p.i))
     setTimeout(() => this.fit(), 250)
   }
@@ -1923,7 +1801,7 @@ export class Engine {
           this.cursors.set(msg.client, { x: msg.x, y: msg.y, tx: msg.x, ty: msg.y, name, color, t: now })
         }
       }
-      this.invalidate(false)
+      this.invalidate()
     } else if (msg.type === 'gone') {
       this.cursors.delete(msg.client)
       const d = this.remote.get(msg.client)
@@ -1941,8 +1819,7 @@ export class Engine {
       this.moving.set(i, [px + ox, py + oy])
       this.r[i] = mod4(d.r0[j] + k)
     }
-    // Held pieces are drawn on the board, not in the scene.
-    this.invalidate(false)
+    this.invalidate()
   }
 
   applyRemote(list) {
@@ -2051,7 +1928,7 @@ export class Engine {
   selectRef(id) {
     if (this.refSel === id) return
     this.refSel = id
-    this.invalidate(false)
+    this.invalidate()
   }
 
   // Screen-space corners of a reference image: [x0, y0, x1, y1].
@@ -2327,9 +2204,7 @@ export class Engine {
     let again = false
 
     if (!this.spriteWorker && (this.built < this.n || this.backQueue.length)) {
-      const had = this.built
       this.buildSome(now + 12)
-      if (this.built !== had) this.sceneVer++
       again = true
     }
 
@@ -2384,12 +2259,6 @@ export class Engine {
         this.sendLive()
         again = true
       }
-      // Re-render the carried sprite if the zoom has drifted far from its resolution.
-      const sp = this.lift.sprite
-      if (sp) {
-        const want = Math.min(this.cam.z * this.dpr * 1.05, this.spriteScale, LIFT_MAX / Math.max(sp.x1 - sp.x0, sp.y1 - sp.y0))
-        if (want / sp.res > 1.3 || sp.res / want > 1.3) this.buildLiftSprite()
-      }
       const target = d.k * Q
       d.angle += (target - d.angle) * ease(dt, 45)
       if (Math.abs(target - d.angle) > 0.001) again = true
@@ -2421,10 +2290,7 @@ export class Engine {
       l.value += (l.target - l.value) * ease(dt, l.target ? 55 : 70)
       if (Math.abs(l.target - l.value) < 0.005) {
         l.value = l.target
-        if (!l.target) {
-          this.lift = null
-          this.sceneVer++
-        }
+        if (!l.target) this.lift = null
       } else again = true
     }
 
@@ -2444,7 +2310,7 @@ export class Engine {
     }
     if (this.cursors.size) {
       clearTimeout(this.idleTimer)
-      this.idleTimer = setTimeout(() => this.invalidate(false), CURSOR_IDLE + 100)
+      this.idleTimer = setTimeout(() => this.invalidate(), CURSOR_IDLE + 100)
     }
 
     if (this.turns.size) {
@@ -2479,56 +2345,14 @@ export class Engine {
 
     if (this.pops.length) again = true
 
-    this.updateActive(now)
-    this.draw(now)
-    if (again) this.invalidate(false)
+    this.draw()
+    if (again) this.invalidate()
   }
 
-  // Pieces in motion (easing into place, turning, flipping or held by another player) are left out
-  // of the scene and drawn on the board every frame instead, so the scene only has to be redrawn
-  // when a piece starts or stops moving, not on every frame of the movement.
-  updateActive(now) {
-    const prev = this.active
-    const next = new Set()
-    for (const i of this.moving.keys()) next.add(i)
-    for (const i of this.turns.keys()) next.add(i)
-    for (const i of this.flips.keys()) next.add(i)
-    let until = Infinity
-    for (const [i, t] of this.held) {
-      if (t <= now) this.held.delete(i)
-      else {
-        next.add(i)
-        until = Math.min(until, t)
-      }
-    }
-    // A player who stops sending lets go after a while; their pieces then return to the scene.
-    clearTimeout(this.heldTimer)
-    if (until < Infinity) this.heldTimer = setTimeout(() => this.invalidate(false), until - now + 20)
-    let same = next.size === prev.size
-    if (same) {
-      for (const i of next) {
-        if (!prev.has(i)) {
-          same = false
-          break
-        }
-      }
-    }
-    if (!same) {
-      this.active = next
-      this.sceneVer++
-    }
-  }
-
-  draw(now) {
+  draw() {
     const { ctx, cam, vw, vh } = this
     const mv = this.mv
     if (cam.x !== mv.x || cam.y !== mv.y || cam.z !== mv.z || vw !== mv.w || vh !== mv.h || this.viewsVer !== this.viewFn) {
-      // The stacked layers are scaled while the zoom changes and redrawn once it rests.
-      if (cam.z !== mv.z) {
-        this.zoomedAt = now
-        clearTimeout(this.zoomTimer)
-        this.zoomTimer = setTimeout(() => this.invalidate(false), ZOOM_SETTLE + 20)
-      }
       mv.x = cam.x
       mv.y = cam.y
       mv.z = cam.z
@@ -2537,42 +2361,12 @@ export class Engine {
       this.viewFn = this.viewsVer
       for (const fn of this.views) fn(cam, vw, vh)
     }
-    this.frameNo++
-
-    this.syncLayer(this.sceneL, this.sceneVer, (c, v) => this.drawScene(c, v))
-    this.updateSpun()
-
-    // The selection outline goes under pieces being carried, and over pieces still landing after a
-    // drop so they get it right away. It is redrawn every frame only while selected pieces move.
-    // Modules turning as one picture bring their own outline.
-    if (this.sel.size) {
-      let moving = false
-      for (const i of this.active) {
-        if (this.sel.has(i) && !this.turns.get(i)?.spun) {
-          moving = true
-          break
-        }
-      }
-      const lifted = this.drag && this.lift?.set
-      const key = `${this.sceneVer}:${this.selVer}:${this.spunVer}:${lifted ? 1 : 0}:${moving ? this.frameNo : 0}`
-      const ids = () => [...this.sel].filter((i) => !lifted?.has(i) && !this.turns.get(i)?.spun)
-      this.syncLayer(this.selL, key, (c, v) => this.drawOutline(c, ids(), this.colors.sel, v), true)
-      const under = !!this.drag
-      if (under !== this.selUnder) {
-        this.selUnder = under
-        if (under) this.canvas.before(this.selL.el)
-        else this.canvas.after(this.selL.el)
-      }
-    } else this.hideLayer(this.selL)
-
+    if (this.gpu) this.drawGpu(mv)
     if (this.dirty) {
       ctx.setTransform(1, 0, 0, 1, 0, 0)
       ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
       this.dirty = false
     }
-    if (this.active.size) this.drawActive(ctx, mv)
-    this.drawHighlight(ctx, mv)
-    if (this.lift) this.drawLift(mv)
     this.drawChrome()
   }
 
@@ -2588,254 +2382,135 @@ export class Engine {
     return c
   }
 
-  // Everything but the pieces that are lifted or moving: the table, its dots, reference images and
-  // the pieces lying still. Drawn onto the scene layer for view v.
-  drawScene(ctx, v) {
+  // Builds a frame for the GPU (see gpu.js) for view v, in device pixels: the trays and reference
+  // images in view, the pieces lying on the table in table order, the lifted pieces, and the
+  // selected and hovered pieces once more for their outlines.
+  drawGpu(v) {
     const { dpr } = this
-    const W = ctx.canvas.width
-    const H = ctx.canvas.height
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-    ctx.fillStyle = this.colors.bg
-    ctx.fillRect(0, 0, W, H)
-    this.drawDots(ctx, v)
-
-    // Trays, then reference images, lie under the pieces.
     const z = v.z * dpr
+    const sx = (wx) => ((wx - v.x) * v.z + v.w / 2) * dpr
+    const sy = (wy) => ((wy - v.y) * v.z + v.h / 2) * dpr
     const { x0: wx0, y0: wy0, x1: wx1, y1: wy1 } = this.cullRect(v, 0)
-    this.drawTrays(ctx, v, wx0, wy0, wx1, wy1)
+
+    this.gTrays = grow(this.gTrays, this.trays.length * TRAY_FLOATS)
+    let trays = 0
+    const radius = Math.min(this.geo.S * 0.25, 10 / v.z) * z
+    for (const t of this.trays) {
+      if (t.x + t.w < wx0 || t.x > wx1 || t.y + t.h < wy0 || t.y > wy1) continue
+      const color = rgba(TRAY_COLORS[t.color] || TRAY_COLORS.gray)
+      const on = t.id === this.traySel
+      const rect = [sx(t.x), sy(t.y), sx(t.x + t.w), sy(t.y + t.h)]
+      const r = Math.min(radius, (rect[2] - rect[0]) / 2, (rect[3] - rect[1]) / 2)
+      this.gTrays.set([...rect, ...pm(color, 0.16), ...pm(on ? rgba(this.colors.sel) : color, on ? 1 : 0.7), r, (on ? 2.5 : 1.25) * dpr, 0, 0], trays++ * TRAY_FLOATS)
+    }
+
+    this.gRefs = grow(this.gRefs, this.refs.length * REF_FLOATS)
+    let refs = 0
     for (const ref of this.refs) {
       const [w, h] = this.refSize(ref)
       if (ref.x + w / 2 < wx0 || ref.x - w / 2 > wx1 || ref.y + h / 2 < wy0 || ref.y - h / 2 > wy1) continue
-      ctx.setTransform(z, 0, 0, z, ((ref.x - v.x) * v.z + v.w / 2) * dpr, ((ref.y - v.y) * v.z + v.h / 2) * dpr)
-      ctx.drawImage(this.refImg, -w / 2, -h / 2, w, h)
       const on = this.selRefs.has(ref.id)
-      ctx.lineWidth = ((on ? 3 : 1) * dpr) / z
-      ctx.strokeStyle = on ? this.colors.sel : this.colors.dot
-      ctx.strokeRect(-w / 2, -h / 2, w, h)
+      const rect = [sx(ref.x - w / 2), sy(ref.y - h / 2), sx(ref.x + w / 2), sy(ref.y + h / 2)]
+      this.gRefs.set([...rect, ...pm(rgba(on ? this.colors.sel : this.colors.dot)), (on ? 3 : 1) * dpr, 0, 0, 0], refs++ * REF_FLOATS)
     }
 
-    const cr = this.cullRect(v, this.radius)
+    const R = this.radius
+    const seen = (x, y, e) => x + e >= wx0 && x - e <= wx1 && y + e >= wy0 && y - e <= wy1
+    this.gn = 0
     const lifted = this.lift?.set
-    const active = this.active
     for (const i of this.order) {
-      if (lifted?.has(i) || active.has(i)) continue
+      if (lifted?.has(i)) continue
       this.poseInto(i)
-      const x = this.qx
-      const y = this.qy
-      if (x < cr.x0 || x > cr.x1 || y < cr.y0 || y > cr.y1) continue
-      this.drawPiece(ctx, i, x, y, this.qa, 1, v)
+      if (seen(this.qx, this.qy, R)) this.gpuPiece(i, this.qx, this.qy, this.qa, 1, v)
     }
-  }
-
-  // Each tray: a tinted, rounded box, outlined in the selection colour while selected.
-  drawTrays(ctx, v, wx0, wy0, wx1, wy1) {
-    if (!this.trays.length) return
-    const { dpr } = this
-    const z = v.z * dpr
-    const r = Math.min(this.geo.S * 0.25, 10 / v.z)
-    for (const t of this.trays) {
-      if (t.x + t.w < wx0 || t.x > wx1 || t.y + t.h < wy0 || t.y > wy1) continue
-      const color = TRAY_COLORS[t.color] || TRAY_COLORS.gray
-      const on = t.id === this.traySel
-      ctx.setTransform(z, 0, 0, z, ((t.x - v.x) * v.z + v.w / 2) * dpr, ((t.y - v.y) * v.z + v.h / 2) * dpr)
-      ctx.fillStyle = color
-      ctx.globalAlpha = 0.16
-      ctx.beginPath()
-      ctx.roundRect(0, 0, t.w, t.h, r)
-      ctx.fill()
-      ctx.globalAlpha = on ? 1 : 0.7
-      ctx.lineWidth = ((on ? 2.5 : 1.25) * dpr) / z
-      ctx.strokeStyle = on ? this.colors.sel : color
-      ctx.beginPath()
-      ctx.roundRect(0, 0, t.w, t.h, r)
-      ctx.stroke()
-      ctx.globalAlpha = 1
+    const still = [0, this.gn]
+    const lift = [this.gn, 0]
+    if (this.lift) {
+      this.liftPoses((i, x, y, a, s) => {
+        if (seen(x, y, R * s)) this.gpuPiece(i, x, y, a, s, v)
+      })
+      lift[1] = this.gn - lift[0]
     }
-  }
+    // The outlined pieces as they lie, and the box around them on the screen.
+    const outlined = (ids, box) => {
+      const first = this.gn
+      const e = R * z
+      for (const i of ids) {
+        this.poseInto(i)
+        if (!seen(this.qx, this.qy, R) || !this.gpuPiece(i, this.qx, this.qy, this.qa, 1, v)) continue
+        const X = sx(this.qx)
+        const Y = sy(this.qy)
+        box[0] = Math.min(box[0], X - e)
+        box[1] = Math.min(box[1], Y - e)
+        box[2] = Math.max(box[2], X + e)
+        box[3] = Math.max(box[3], Y + e)
+      }
+      return [first, this.gn - first]
+    }
+    // While carrying pieces, the selection outline goes under them, and leaves them out.
+    const selBox = [Infinity, Infinity, -Infinity, -Infinity]
+    const carried = this.drag && lifted
+    const sel = this.sel.size ? outlined(carried ? [...this.sel].filter((i) => !carried.has(i)) : this.sel, selBox) : [0, 0]
+    const hlBox = [Infinity, Infinity, -Infinity, -Infinity]
+    const hl = this.hl && !this.drag ? outlined(this.hl.ids, hlBox) : [0, 0]
 
-  // The dot grid, filled in one go from a small tile holding a single dot. The tile is a whole
-  // number of pixels, and the pattern is scaled by the little that is left over so the dots stay on
-  // the world grid.
-  drawDots(ctx, v) {
-    const { dpr } = this
     let sp = this.geo.S
     while (sp * v.z < 22) sp *= 2
     while (sp * v.z > 44) sp /= 2
-    const step = sp * v.z * dpr
-    const N = Math.max(1, Math.round(step))
-    const k = step / N
-    const ds = Math.max(1, 1.25 * dpr) / k
-    const key = `${N}:${ds}:${this.colors.dot}`
-    if (key !== this.dotKey) {
-      const tile = makeCanvas(N, N)
-      const tc = tile.getContext('2d')
-      tc.fillStyle = this.colors.dot
-      tc.fillRect(N / 2 - ds / 2, N / 2 - ds / 2, ds, ds)
-      this.dotPattern = ctx.createPattern(tile, 'repeat')
-      this.dotKey = key
-    }
-    // Where world (0, 0), a grid point, lands, less half a tile, wrapped to within one step.
-    const wrap = (a) => ((a % step) + step) % step
-    const ox = wrap((-v.x * v.z + v.w / 2) * dpr - (k * N) / 2)
-    const oy = wrap((-v.y * v.z + v.h / 2) * dpr - (k * N) / 2)
-    this.dotPattern.setTransform(new DOMMatrix([k, 0, 0, k, ox, oy]))
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-    ctx.fillStyle = this.dotPattern
-    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height)
-  }
-
-  // Which turns can be drawn as one picture: a big module turning on the table, all of it still in
-  // that turn and none of it also moving, flipping or held. Marks them spun, and bumps spunVer when
-  // that changes, so the selection outline is redrawn without them or with them again.
-  updateSpun() {
-    const now = new Set()
-    if (this.turns.size) {
-      const seen = new Set()
-      for (const t of this.turns.values()) {
-        if (seen.has(t)) continue
-        seen.add(t)
-        t.spun = !!t.ids && t.ids.every((i) => this.turns.get(i) === t && !this.moving.has(i) && !this.flips.has(i) && !this.held.has(i))
-        if (t.spun) now.add(t)
-      }
-    }
-    const was = (this.spun ??= new Set())
-    if (now.size !== was.size || [...now].some((t) => !was.has(t))) this.spunVer = (this.spunVer || 0) + 1
-    this.spun = now
-  }
-
-  // A module turning on the table drawn once, as it lies after the turn, into a picture the size of
-  // its box, with its selection outline in another if it is selected. Kept for the whole turn.
-  turnSprite(t) {
-    if (t.sprite) return t.sprite
-    const R = this.radius
-    let x0 = Infinity
-    let y0 = Infinity
-    let x1 = -Infinity
-    let y1 = -Infinity
-    for (const i of t.ids) {
-      x0 = Math.min(x0, this.x[i] - R)
-      y0 = Math.min(y0, this.y[i] - R)
-      x1 = Math.max(x1, this.x[i] + R)
-      y1 = Math.max(y1, this.y[i] + R)
-    }
-    const res = Math.min(this.cam.z * this.dpr * 1.05, this.spriteScale, LIFT_MAX / Math.max(x1 - x0, y1 - y0))
-    const W = Math.max(1, Math.ceil((x1 - x0) * res))
-    const H = Math.max(1, Math.ceil((y1 - y0) * res))
-    const c = makeCanvas(W, H)
-    const ctx = c.getContext('2d')
-    const set = new Set(t.ids)
-    const w = this.spriteW
-    const h = this.spriteH
-    for (const i of this.order) {
-      if (!set.has(i)) continue
-      const lv = this.face(i, true)
-      if (!lv) continue
-      const sx = this.fsx
-      const a = this.r[i] * Q
-      const co = Math.cos(a) * res
-      const sn = Math.sin(a) * res
-      ctx.setTransform(co * sx, sn * sx, -sn, co, (this.x[i] - x0) * res, (this.y[i] - y0) * res)
-      ctx.drawImage(this.pick(lv, res), -w / 2, -h / 2, w, h)
-    }
-    let line = null
-    if (this.sel.has(t.ids[0])) {
-      // The outline as it will be after the turn: drawn with no turns in progress.
-      line = makeCanvas(W, H)
-      const turns = this.turns
-      this.turns = new Map()
-      const v = { x: x0 + W / res / 2, y: y0 + H / res / 2, z: res / this.dpr, w: W / this.dpr, h: H / this.dpr }
-      if (!this.drawOutline(line.getContext('2d'), set, this.colors.sel, v)) line = null
-      this.turns = turns
-    }
-    return (t.sprite = { c, line, x0, y0, res })
-  }
-
-  // A spun module (see updateSpun) at its turn so far: its picture turned around the turn's centre.
-  drawTurn(ctx, t, v) {
-    const sp = this.turnSprite(t)
-    const { dpr } = this
-    const z = (v.z * dpr) / sp.res
-    const co = Math.cos(t.a) * z
-    const sn = Math.sin(t.a) * z
-    ctx.setTransform(co, sn, -sn, co, ((t.cx - v.x) * v.z + v.w / 2) * dpr, ((t.cy - v.y) * v.z + v.h / 2) * dpr)
-    const x = (sp.x0 - t.cx) * sp.res
-    const y = (sp.y0 - t.cy) * sp.res
-    ctx.drawImage(sp.c, x, y)
-    if (sp.line) ctx.drawImage(sp.line, x, y)
-  }
-
-  // The pieces left out of the scene because they move, in table order. Spun modules go first, each
-  // as one picture.
-  drawActive(ctx, v) {
-    for (const t of this.spun) {
-      this.drawTurn(ctx, t, v)
-      this.dirty = true
-    }
-    const cr = this.cullRect(v, this.radius * 1.2)
-    const lifted = this.lift?.set
-    const active = this.active
-    for (const i of this.order) {
-      if (!active.has(i) || lifted?.has(i) || this.turns.get(i)?.spun) continue
-      this.poseInto(i)
-      const x = this.qx
-      const y = this.qy
-      if (x < cr.x0 || x > cr.x1 || y < cr.y0 || y > cr.y1) continue
-      this.drawPiece(ctx, i, x, y, this.qa, 1, v)
-      this.dirty = true
-    }
-  }
-
-  // The hover outline of one piece, drawn into a canvas just big enough for the part of it on the
-  // board (zoomed far in, a piece can be many times the size of the screen) and copied onto the
-  // board at a whole pixel. Only redrawn when the piece, its pose or the view changes.
-  drawHighlight(ctx, mv) {
-    const hl = this.hl
-    if (!hl || this.drag) return
-    const { dpr } = this
-    const i = hl.ids[0]
-    this.poseInto(i)
-    // Big enough for a long piece reaching out from its first cell.
-    const r = (this.radius + (hl.ids.length - 1) * Math.max(this.geo.w, this.geo.h)) * mv.z + 8
-    const X = ((this.qx - mv.x) * mv.z + mv.w / 2) * dpr
-    const Y = ((this.qy - mv.y) * mv.z + mv.h / 2) * dpr
-    const x0 = Math.max(0, Math.floor(X - r * dpr))
-    const y0 = Math.max(0, Math.floor(Y - r * dpr))
-    const x1 = Math.min(this.canvas.width, Math.ceil(X + r * dpr) + 2)
-    const y1 = Math.min(this.canvas.height, Math.ceil(Y + r * dpr) + 2)
-    if (x1 <= x0 || y1 <= y0) return
-    const bw = x1 - x0
-    const bh = y1 - y0
-    const c = this.hlLayer
-    const color = this.colors.line || '#000'
-    const key = `${hl.key}:${this.qx}:${this.qy}:${this.qa}:${mv.x}:${mv.y}:${mv.z}:${dpr}:${x0}:${y0}:${bw}:${bh}:${color}`
-    if (key !== this.hlKey) {
-      // Grown as needed, and shrunk again when far too big.
-      if (c.width < bw || c.height < bh || c.width * c.height > 4 * bw * bh) {
-        c.width = bw
-        c.height = bh
-      }
-      const w = bw / dpr
-      const h = bh / dpr
-      const v = { x: mv.x + (x0 / dpr + w / 2 - mv.w / 2) / mv.z, y: mv.y + (y0 / dpr + h / 2 - mv.h / 2) / mv.z, z: mv.z, w, h }
-      this.hlShown = this.drawOutline(this.hlCtx, hl.ids, color, v)
-      this.hlKey = key
-    }
-    if (!this.hlShown) return
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-    ctx.drawImage(c, 0, 0, bw, bh, x0, y0, bw, bh)
-    this.dirty = true
-  }
-
-  // Draws the lifted pieces with a drop shadow onto the board. Carried as one sprite, they are one
-  // drawImage and their blurred shadow is kept (see shadowFor()). Otherwise (mid spin, or landing
-  // after a drop that didn't move everything alike) the pieces are drawn one by one into a layer
-  // and the shadow is blurred from that at a third of the resolution, only within their box.
-  drawLift(mv) {
-    const { ctx, dpr, cam } = this
-    const { vw, vh } = this
     const l = this.lift
-    // Lifted pieces grow a little, spreading out from the pointer as they do, or from (cx, cy) off
-    // it when set (a tray's middle, in the carried pieces' own frame, before any turn).
+    this.gpu.frame({
+      W: this.gpuEl.width,
+      H: this.gpuEl.height,
+      cam: [v.x, v.y, z],
+      sprite: [this.spriteW, this.spriteH],
+      bg: rgba(this.colors.bg),
+      dot: rgba(this.colors.dot),
+      dotStep: sp,
+      dotSize: Math.max(1, 1.25 * dpr),
+      trays: { data: this.gTrays, count: trays },
+      refs: { data: this.gRefs, count: refs },
+      pieces: { data: this.gi, count: this.gn },
+      seg: { still, lift, sel, hl },
+      selBox,
+      hlBox,
+      selColor: rgba(this.colors.sel),
+      hlColor: rgba(this.colors.line || '#000'),
+      outline: [2.5 * dpr, 0.75 * dpr],
+      selUnder: !!this.drag,
+      shadow: l && { color: rgba(this.colors.shadow), blur: (4 + 26 * l.value) * dpr, ox: (1 + 7 * l.value) * dpr, oy: (2 + 16 * l.value) * dpr },
+    })
+  }
+
+  // Adds piece i at (x, y), turned a and scaled s, to the frame's instances for view v, like a 2D
+  // drawImage with the transform (a b c d e f): mirrored when face down, squeezed mid flip. False
+  // while its sprite isn't on the GPU yet.
+  gpuPiece(i, x, y, a, s, v) {
+    if (!this.face(i) || (this.gn + 1) * PIECE_FLOATS > this.gi.length) return false
+    const fx = this.fsx
+    const cell = fx >= 0 ? i : this.backCells.get(i)
+    if (cell === undefined || !this.gpu.has[cell]) return false
+    const z = v.z * this.dpr * s * this.flift
+    const c = Math.cos(a) * z
+    const sn = Math.sin(a) * z
+    const k = this.gn++ * PIECE_FLOATS
+    const f = this.gi
+    f[k] = c * fx
+    f[k + 1] = sn * fx
+    f[k + 2] = -sn
+    f[k + 3] = c
+    f[k + 4] = ((x - v.x) * v.z + v.w / 2) * this.dpr
+    f[k + 5] = ((y - v.y) * v.z + v.h / 2) * this.dpr
+    this.giu[k + 6] = cell
+    return true
+  }
+
+  // Where each lifted piece is drawn: fn(i, x, y, angle, scale). Lifted pieces grow a little,
+  // spreading out from the pointer as they do, or from (cx, cy) off it when set (a tray's middle, in
+  // the carried pieces' own frame, before any turn). Carried, each sits at its offset from the
+  // pointer, turned with the carry and with what's left of a spin around its module's middle, and
+  // of a gather (G). Landing after a drop, they shrink back to where they lie.
+  liftPoses(fn) {
+    const l = this.lift
     const s = 1 + 0.045 * l.value
     const d = this.drag && this.drag.set === l.set ? this.drag : null
     const a = d ? d.angle : l.angle
@@ -2845,167 +2520,20 @@ export class Engine {
     const gy = (l.cy || 0) * (1 - s)
     const px = l.px + gx * Math.cos(a) - gy * Math.sin(a)
     const py = l.py + gx * Math.sin(a) + gy * Math.cos(a)
-    this.dirty = true
-
-    // Mid spin the sprite still does when everything carried turns together around one centre (one
-    // module, or all of it at once): it's the sprite turned by what's left of the spin.
-    const turn = d?.spinning ? this.rigidSpin(d) : null
-    if (l.sprite && (!d?.spinning || turn)) {
-      const sp = l.sprite
-      const z = (cam.z * dpr * s) / sp.res
-      const co = Math.cos(a) * z
-      const sn = Math.sin(a) * z
-      const X = ((px - cam.x) * cam.z + vw / 2) * dpr
-      const Y = ((py - cam.y) * cam.z + vh / 2) * dpr
-      // Turns the sprite (in its own pixels, k of them per sprite pixel) around the spin's centre.
-      const spun = (k) => {
-        if (!turn?.a) return
-        ctx.translate((turn.cx * sp.res) / k, (turn.cy * sp.res) / k)
-        ctx.rotate(turn.a)
-        ctx.translate((-turn.cx * sp.res) / k, (-turn.cy * sp.res) / k)
-      }
-      const sh = this.shadowFor(sp, l.value, z)
-      const q = sh.q
-      ctx.setTransform(co * q, sn * q, -sn * q, co * q, X + (1 + 7 * l.value) * dpr, Y + (2 + 16 * l.value) * dpr)
-      spun(q)
-      ctx.drawImage(sh.c, (sp.x0 * sp.res) / q - sh.pad, (sp.y0 * sp.res) / q - sh.pad)
-      ctx.setTransform(co, sn, -sn, co, X, Y)
-      spun(1)
-      ctx.drawImage(sp.c, sp.x0 * sp.res, sp.y0 * sp.res)
+    if (!d) {
+      for (const i of l.ids) fn(i, px + (this.x[i] - l.px) * s, py + (this.y[i] - l.py) * s, this.r[i] * Q, s)
       return
     }
-
-    const { x0: wx0, y0: wy0, x1: wx1, y1: wy1 } = this.cullRect(mv, 0)
-    const lc = this.lctx
-    if (this.layer.width !== this.canvas.width || this.layer.height !== this.canvas.height) {
-      this.layer.width = this.canvas.width
-      this.layer.height = this.canvas.height
-      this.liftBox = null
+    const ca = Math.cos(d.angle)
+    const sa = Math.sin(d.angle)
+    for (let j = 0; j < d.ids.length; j++) {
+      const t = d.sa[j]
+      const dx = d.ox[j] - d.cx[j]
+      const dy = d.oy[j] - d.cy[j]
+      const ox = d.spinning ? d.cx[j] + dx * Math.cos(t) - dy * Math.sin(t) + d.tx[j] : d.ox[j]
+      const oy = d.spinning ? d.cy[j] + dx * Math.sin(t) + dy * Math.cos(t) + d.ty[j] : d.oy[j]
+      fn(d.ids[j], px + (ox * ca - oy * sa) * s, py + (ox * sa + oy * ca) * s, d.r0[j] * Q + (d.spinning ? t : 0) + d.angle, s)
     }
-    const W = this.layer.width
-    const H = this.layer.height
-    lc.setTransform(1, 0, 0, 1, 0, 0)
-    const pb = this.liftBox
-    if (pb) lc.clearRect(pb[0], pb[1], pb[2] - pb[0], pb[3] - pb[1])
-    else lc.clearRect(0, 0, W, H)
-
-    let bx0 = Infinity
-    let by0 = Infinity
-    let bx1 = -Infinity
-    let by1 = -Infinity
-    const grow = (x, y) => {
-      bx0 = Math.min(bx0, x)
-      by0 = Math.min(by0, y)
-      bx1 = Math.max(bx1, x)
-      by1 = Math.max(by1, y)
-    }
-
-    const R = this.radius
-    const e = R * s * cam.z * dpr
-    if (d?.spinning) {
-      // Mid spin every piece turns on its own, so draw them one by one instead of the sprite.
-      const ca = Math.cos(d.angle)
-      const sa = Math.sin(d.angle)
-      for (let j = 0; j < d.ids.length; j++) {
-        const a = d.sa[j]
-        const dx = d.ox[j] - d.cx[j]
-        const dy = d.oy[j] - d.cy[j]
-        const ox = d.cx[j] + dx * Math.cos(a) - dy * Math.sin(a) + d.tx[j]
-        const oy = d.cy[j] + dx * Math.sin(a) + dy * Math.cos(a) + d.ty[j]
-        const x = px + (ox * ca - oy * sa) * s
-        const y = py + (ox * sa + oy * ca) * s
-        if (x + R * s < wx0 || x - R * s > wx1 || y + R * s < wy0 || y - R * s > wy1) continue
-        this.drawPiece(lc, d.ids[j], x, y, d.r0[j] * Q + a + d.angle, s, mv)
-        const X = ((x - cam.x) * cam.z + vw / 2) * dpr
-        const Y = ((y - cam.y) * cam.z + vh / 2) * dpr
-        grow(X - e, Y - e)
-        grow(X + e, Y + e)
-      }
-    } else {
-      for (const i of l.ids) {
-        const x = px + (this.x[i] - l.px) * s
-        const y = py + (this.y[i] - l.py) * s
-        if (x + R * s < wx0 || x - R * s > wx1 || y + R * s < wy0 || y - R * s > wy1) continue
-        this.drawPiece(lc, i, x, y, this.r[i] * Q, s, mv)
-        const X = ((x - cam.x) * cam.z + vw / 2) * dpr
-        const Y = ((y - cam.y) * cam.z + vh / 2) * dpr
-        grow(X - e, Y - e)
-        grow(X + e, Y + e)
-      }
-    }
-
-    const pad = 50 * dpr
-    const x0 = Math.max(0, Math.floor(bx0 - pad))
-    const y0 = Math.max(0, Math.floor(by0 - pad))
-    const x1 = Math.min(W, Math.ceil(bx1 + pad))
-    const y1 = Math.min(H, Math.ceil(by1 + pad))
-    if (x1 <= x0 || y1 <= y0) {
-      this.liftBox = null
-      return
-    }
-    // Pieces are only ever drawn inside the padded box, so next frame only has to clear that.
-    this.liftBox = [Math.max(0, Math.floor(bx0 - 2)), Math.max(0, Math.floor(by0 - 2)), Math.min(W, Math.ceil(bx1 + 2)), Math.min(H, Math.ceil(by1 + 2))]
-    const bw = x1 - x0
-    const bh = y1 - y0
-
-    const k = 3
-    const sw = Math.ceil(bw / k)
-    const sh = Math.ceil(bh / k)
-    const shl = this.shadowLayer
-    if (shl.width < sw || shl.height < sh) {
-      shl.width = Math.max(shl.width, sw)
-      shl.height = Math.max(shl.height, sh)
-    }
-    const sx = this.shCtx
-    sx.setTransform(1, 0, 0, 1, 0, 0)
-    sx.clearRect(0, 0, sw + 1, sh + 1)
-    // Draw the silhouette off-canvas and let only its shadow land in view.
-    const off = shl.width + 20
-    sx.shadowColor = this.colors.shadow
-    sx.shadowBlur = ((4 + 26 * l.value) * dpr) / k
-    sx.shadowOffsetX = off + ((1 + 7 * l.value) * dpr) / k
-    sx.shadowOffsetY = ((2 + 16 * l.value) * dpr) / k
-    sx.drawImage(this.layer, x0, y0, bw, bh, -off, 0, bw / k, bh / k)
-    sx.shadowColor = 'transparent'
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-    ctx.drawImage(shl, 0, 0, bw / k, bh / k, x0, y0, bw, bh)
-    ctx.drawImage(this.layer, x0, y0, bw, bh, x0, y0, bw, bh)
-  }
-
-  // Mid spin: the centre every carried piece turns around and the turn still left, if they all share
-  // them and nothing is being gathered, so the lift sprite can be drawn turned. Null otherwise.
-  rigidSpin(d) {
-    const { cx, cy, sa, tx, ty } = d
-    for (let j = 0; j < sa.length; j++) {
-      if (cx[j] !== cx[0] || cy[j] !== cy[0] || sa[j] !== sa[0] || tx[j] || ty[j]) return null
-    }
-    return { cx: cx[0], cy: cy[0], a: sa[0] }
-  }
-
-  // The lift sprite's blurred silhouette at a third of its resolution, for a shadow drawn under it
-  // with the same transform. z is how many board pixels a sprite pixel covers now. Kept while the
-  // lift has settled and the zoom stays close, so a drag doesn't blur anything per frame.
-  shadowFor(sp, value, z) {
-    const o = this.liftShadow
-    const color = this.colors.shadow
-    if (o && o.sp === sp && o.color === color && Math.abs(o.value - value) < 0.01 && o.z / z < 1.15 && z / o.z < 1.15) return o
-    const q = 3
-    const blur = ((4 + 26 * value) * this.dpr) / (z * q)
-    const pad = Math.ceil(blur * 1.5) + 2
-    const c = o?.c || makeCanvas(0, 0)
-    const w = Math.ceil(sp.c.width / q)
-    const h = Math.ceil(sp.c.height / q)
-    c.width = w + 2 * pad
-    c.height = h + 2 * pad
-    const x = c.getContext('2d')
-    // Draw the silhouette off-canvas and let only its shadow land.
-    const off = c.width + 20
-    x.shadowColor = color
-    x.shadowBlur = blur
-    x.shadowOffsetX = off
-    x.drawImage(sp.c, pad - off, pad, sp.c.width / q, sp.c.height / q)
-    return (this.liftShadow = { c, sp, color, value, z, q, pad })
   }
 
   // Screen-space overlays: the selection box and the selected reference image's handles.
@@ -3133,178 +2661,5 @@ export class Engine {
       ctx.fillStyle = '#fff'
       ctx.fillText(c.name, lx + 6, ly + 9.5)
     }
-  }
-
-  // Outline around the union of the given pieces (no inner seams): stroke every
-  // outline, then punch the piece shapes back out. Only pieces on the edge of the union are
-  // stroked, and only those and their neighbours punched, so a big module costs about its rim.
-  // Clears c's canvas and draws the outline there for view v. Returns whether anything was in view.
-  drawOutline(c, ids, color, v) {
-    const { dpr } = this
-    const z = v.z * dpr
-    const { cols, rows } = this.room
-    const set = ids instanceof Set ? ids : new Set(ids)
-    // A grid neighbour in the same group and the same set lies exactly against the piece.
-    const inner = (i) => {
-      const col = i % cols
-      const row = (i / cols) | 0
-      const g = this.g[i]
-      for (let dr = -1; dr <= 1; dr++) {
-        for (let dc = -1; dc <= 1; dc++) {
-          if (!dr && !dc) continue
-          const cc = col + dc
-          const rr = row + dr
-          if (cc < 0 || rr < 0 || cc >= cols || rr >= rows) return false
-          const j = rr * cols + cc
-          if (this.g[j] !== g || !set.has(j)) return false
-        }
-      }
-      return true
-    }
-    const cr = this.cullRect(v, this.radius + (5 * dpr) / z)
-    const edge = []
-    const rim = new Set()
-    for (const i of set) {
-      this.poseInto(i)
-      if (this.qx < cr.x0 || this.qx > cr.x1 || this.qy < cr.y0 || this.qy > cr.y1) continue
-      if (inner(i)) continue
-      edge.push(i)
-      rim.add(i)
-    }
-    // Strokes reach into the neighbours of edge pieces, so those get punched too (after the edge pieces).
-    const punch = edge.slice()
-    for (const i of edge) {
-      const col = i % cols
-      const row = (i / cols) | 0
-      for (let dr = -1; dr <= 1; dr++) {
-        for (let dc = -1; dc <= 1; dc++) {
-          const cc = col + dc
-          const rr = row + dr
-          if (cc < 0 || rr < 0 || cc >= cols || rr >= rows) continue
-          const j = rr * cols + cc
-          if (!rim.has(j) && set.has(j) && this.g[j] === this.g[i]) {
-            rim.add(j)
-            punch.push(j)
-          }
-        }
-      }
-    }
-    const place = (i) => {
-      this.poseInto(i)
-      const co = Math.cos(this.qa) * z
-      const sn = Math.sin(this.qa) * z
-      const sx = this.f[i] ? -1 : 1
-      c.setTransform(co * sx, sn * sx, -sn, co, ((this.qx - v.x) * v.z + v.w / 2) * dpr, ((this.qy - v.y) * v.z + v.h / 2) * dpr)
-    }
-    c.setTransform(1, 0, 0, 1, 0, 0)
-    c.clearRect(0, 0, c.canvas.width, c.canvas.height)
-    if (!edge.length) return false
-    if (punch.length > OUTLINE_PATHS) this.outlineMasks(c, edge, punch, color, v)
-    else {
-      c.lineJoin = 'round'
-      c.strokeStyle = color
-      c.lineWidth = (5 * dpr) / z
-      for (const i of edge) {
-        place(i)
-        c.stroke(this.paths[i])
-      }
-      c.globalCompositeOperation = 'destination-out'
-      c.lineWidth = (1.5 * dpr) / z
-      for (const i of punch) {
-        place(i)
-        c.fill(this.paths[i])
-        c.stroke(this.paths[i])
-      }
-      c.globalCompositeOperation = 'source-over'
-    }
-    return true
-  }
-
-  // The same outline as the stroked one, for many pieces at once: draws the edge pieces'
-  // silhouettes (one image each, as cheap as drawing the pieces), grows that by the outline width
-  // by stamping it around a circle, colours it, and cuts the silhouettes of the edge pieces and
-  // their neighbours back out. Past the silhouettes the cost doesn't depend on how many pieces there are.
-  // The silhouettes go in a canvas only as big as the edge pieces' box.
-  outlineMasks(c, edge, punch, color, v) {
-    const { dpr } = this
-    const z = v.z * dpr
-    const W = c.canvas.width
-    const H = c.canvas.height
-    const e = this.radius * z
-    const r = 2.5 * dpr
-    const q = 0.75 * dpr
-    const pad = Math.ceil(r) + 2
-    let bx0 = Infinity
-    let by0 = Infinity
-    let bx1 = -Infinity
-    let by1 = -Infinity
-    for (const i of edge) {
-      this.poseInto(i)
-      const X = ((this.qx - v.x) * v.z + v.w / 2) * dpr
-      const Y = ((this.qy - v.y) * v.z + v.h / 2) * dpr
-      bx0 = Math.min(bx0, X - e)
-      by0 = Math.min(by0, Y - e)
-      bx1 = Math.max(bx1, X + e)
-      by1 = Math.max(by1, Y + e)
-    }
-    const x0 = Math.max(0, Math.floor(bx0) - pad)
-    const y0 = Math.max(0, Math.floor(by0) - pad)
-    const x1 = Math.min(W, Math.ceil(bx1) + pad)
-    const y1 = Math.min(H, Math.ceil(by1) + pad)
-    if (x1 <= x0 || y1 <= y0) return
-    const bw = x1 - x0
-    const bh = y1 - y0
-    const M = this.maskLayer
-    const mc = this.maskCtx
-    // Grown as needed, and shrunk again when far too big, so it doesn't hold a whole screen for good.
-    if (M.width < bw || M.height < bh || M.width * M.height > 4 * bw * bh) {
-      M.width = bw
-      M.height = bh
-    }
-    mc.setTransform(1, 0, 0, 1, 0, 0)
-    mc.clearRect(0, 0, bw, bh)
-    const sw = this.spriteW
-    const sh = this.spriteH
-    const silhouette = (i) => {
-      this.poseInto(i)
-      const X = ((this.qx - v.x) * v.z + v.w / 2) * dpr - x0
-      const Y = ((this.qy - v.y) * v.z + v.h / 2) * dpr - y0
-      const mk = (this.masks[i] ??= this.makeMask(i))
-      const co = Math.cos(this.qa) * z
-      const sn = Math.sin(this.qa) * z
-      const fx = this.f[i] ? -1 : 1
-      mc.setTransform(co * fx, sn * fx, -sn, co, X, Y)
-      mc.drawImage(mk, -sw / 2, -sh / 2, sw, sh)
-    }
-    for (const i of edge) silhouette(i)
-    c.setTransform(1, 0, 0, 1, 0, 0)
-    const stamp = (dx, dy) => c.drawImage(M, 0, 0, bw, bh, x0 + dx, y0 + dy, bw, bh)
-    for (let k = 0; k < 12; k++) stamp(Math.cos((k * Math.PI) / 6) * r, Math.sin((k * Math.PI) / 6) * r)
-    c.globalCompositeOperation = 'source-in'
-    c.fillStyle = color
-    c.fillRect(x0 - pad, y0 - pad, bw + 2 * pad, bh + 2 * pad)
-    // Punch holds the edge pieces first, so this adds just their neighbours.
-    for (let k = edge.length; k < punch.length; k++) silhouette(punch[k])
-    // Cutting out a slightly grown silhouette also clears the faint seams between pieces.
-    c.globalCompositeOperation = 'destination-out'
-    stamp(0, 0)
-    for (let k = 0; k < 8; k++) stamp(Math.cos((k * Math.PI) / 4) * q, Math.sin((k * Math.PI) / 4) * q)
-    c.globalCompositeOperation = 'source-over'
-  }
-
-  // Draws piece i at (x, y, angle a), scaled by s, into ctx for view v, from the smallest sprite
-  // level that is still sharp at this zoom.
-  drawPiece(ctx, i, x, y, a, s, v) {
-    const lv = this.face(i)
-    if (!lv) return
-    const { dpr } = this
-    const sx = this.fsx
-    const z = v.z * dpr * s * this.flift
-    const c = Math.cos(a) * z
-    const sn = Math.sin(a) * z
-    ctx.setTransform(c * sx, sn * sx, -sn, c, ((x - v.x) * v.z + v.w / 2) * dpr, ((y - v.y) * v.z + v.h / 2) * dpr)
-    const w = this.spriteW
-    const h = this.spriteH
-    ctx.drawImage(this.pick(lv, z), -w / 2, -h / 2, w, h)
   }
 }
