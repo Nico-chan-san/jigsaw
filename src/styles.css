@@ -1185,6 +1185,38 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 .room.notch .tc {
   top: calc(8px + var(--notch));
 }
+
+/* The dev menu (npm run dev only), floating under the top middle toolbar. */
+.float.dev-menu {
+  top: 68px;
+  left: 50%;
+  align-items: center;
+  transform: translateX(-50%);
+}
+.room.notch .dev-menu {
+  top: calc(60px + var(--notch));
+}
+.dev-label {
+  padding: 0 8px 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.dev-btn {
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.dev-btn:hover {
+  background: var(--hover);
+}
 .play-tools .icon-btn {
   cursor: grab;
   touch-action: none;
@@ -1361,6 +1393,9 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 @media (max-width: 640px) {
   .tc {
     top: 68px;
+  }
+  .float.dev-menu {
+    top: 120px;
   }
 }
 

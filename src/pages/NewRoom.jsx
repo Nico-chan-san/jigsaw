@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../lib/api.js'
-import { SHAPES, buildPuzzle, gridFor, outlinePath, pile, samplePiecePath, scatter } from '../lib/geometry.js'
+import { SHAPES, buildPuzzle, gridFor, longPaths, outlinePath, pile, samplePiecePath, scatter } from '../lib/geometry.js'
 import { useApp } from '../App.jsx'
 import { Arrow, Chevron, Close, Upload } from '../components/icons.jsx'
 import InviteList from '../components/Invite.jsx'
@@ -67,6 +67,7 @@ const shapeName = (s) => s[0].toUpperCase() + s.slice(1)
 // A dropdown of piece shapes, each shown with its outline. The list floats over the window
 // (position: fixed), so opening it doesn't grow or scroll the form around it. It opens below the
 // button, or above when there's no room, and follows the button when the form scrolls.
+// Picking a shape leaves it open, so shapes can be tried one after another on the preview.
 function ShapePicker({ value, onChange }) {
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState(null)
@@ -139,10 +140,7 @@ function ShapePicker({ value, onChange }) {
                 className={`shape-option${s === value ? ' on' : ''}`}
                 role="option"
                 aria-selected={s === value}
-                onClick={() => {
-                  onChange(s)
-                  setOpen(false)
-                }}
+                onClick={() => onChange(s)}
               >
                 <ShapeIcon shape={s} />
                 <span>{shapeName(s)}</span>
@@ -155,7 +153,7 @@ function ShapePicker({ value, onChange }) {
   )
 }
 
-function Preview({ img, cols, rows, shape, seed }) {
+function Preview({ img, cols, rows, shape, seed, longPieces }) {
   const ref = useRef(null)
   useEffect(() => {
     const c = ref.current
@@ -171,19 +169,20 @@ function Preview({ img, cols, rows, shape, seed }) {
     const ctx = c.getContext('2d')
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.drawImage(img, 0, 0, w, h)
-    const geo = buildPuzzle({ cols, rows, width: w, height: h, shape, seed })
+    const geo = buildPuzzle({ cols, rows, width: w, height: h, shape, seed, longPieces })
     ctx.lineWidth = 1
     ctx.lineJoin = 'round'
     for (const p of geo.pieces) {
       ctx.setTransform(dpr, 0, 0, dpr, p.cx * dpr, p.cy * dpr)
-      const path = outlinePath(p.outline)
+      // A long piece's cells only draw their cut sides.
+      const path = longPaths(p, 0)?.rim || outlinePath(p.outline)
       ctx.strokeStyle = 'rgba(0,0,0,.45)'
       ctx.stroke(path)
       ctx.setTransform(dpr, 0, 0, dpr, (p.cx + 0.6) * dpr, (p.cy + 0.6) * dpr)
       ctx.strokeStyle = 'rgba(255,255,255,.35)'
       ctx.stroke(path)
     }
-  }, [img, cols, rows, shape, seed])
+  }, [img, cols, rows, shape, seed, longPieces])
   return <canvas ref={ref} />
 }
 
@@ -199,6 +198,7 @@ export default function NewRoom({ bar }) {
   const [typed, setTyped] = useState(null)
   const [shape, setShape] = useState('classic')
   const [hardcore, setHardcore] = useState(false)
+  const [longPieces, setLongPieces] = useState(false)
   const [hidden, setHidden] = useState(false)
   // Players to email the private jigsaw's link to, by id.
   const [invited, setInvited] = useState(() => new Set())
@@ -256,7 +256,7 @@ export default function NewRoom({ bar }) {
     try {
       const full = encode(img, maxSide(grid.cols, grid.rows), 0.9)
       const thumb = encode(img, 480, 0.8)
-      const room = { cols: grid.cols, rows: grid.rows, width: full.width, height: full.height, shape, seed }
+      const room = { cols: grid.cols, rows: grid.rows, width: full.width, height: full.height, shape, seed, longPieces }
       const { id } = await api.create({
         ...room,
         name: name.trim() || 'Jigsaw',
@@ -311,7 +311,7 @@ export default function NewRoom({ bar }) {
             }}
           >
             {img ? (
-              <Preview img={img} {...grid} shape={shape} seed={seed} />
+              <Preview img={img} {...grid} shape={shape} seed={seed} longPieces={longPieces} />
             ) : (
               <span className="drop-empty">
                 <span className="drop-icon">
@@ -390,6 +390,7 @@ export default function NewRoom({ bar }) {
         <section className="field">
           <h2 className="label">Options</h2>
           <div className="options">
+            {option(longPieces, setLongPieces, 'Big pieces', 'Some pieces are two to five in one: long, L, T and other shapes.')}
             {option(hardcore, setHardcore, 'Hardcore mode', 'One messy pile, many pieces face down.')}
             {option(hidden, setHidden, 'Private room', 'Only people with the link can join.')}
             {hidden && (

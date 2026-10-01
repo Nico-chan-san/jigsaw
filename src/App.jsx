@@ -118,6 +118,14 @@ export default function App() {
       return !v
     })
   }, [])
+  // The dev menu over the board, only in development (npm run dev). Off unless turned on.
+  const [devMenu, setDevMenu] = useState(() => import.meta.env.DEV && store.get('devMenu') === '1')
+  const toggleDevMenu = useCallback(() => {
+    setDevMenu((v) => {
+      store.set('devMenu', v ? null : '1')
+      return !v
+    })
+  }, [])
   const [player, setPlayerState] = useState(readPlayer)
   const playerRef = useRef(player)
   const [prompt, setPrompt] = useState(null)
@@ -227,6 +235,8 @@ export default function App() {
     toggleTheme,
     sound,
     toggleSound,
+    devMenu,
+    toggleDevMenu,
     player,
     playerId: player?.id || null,
     // The player right now, for code that runs after an await (state in a closure may be stale).

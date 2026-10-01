@@ -44,7 +44,7 @@ self.onmessage = (e) => {
     flush('front', true)
     for (const i of backs) {
       const ctx = blank()
-      drawBack(ctx, o, paths[i])
+      drawBack(ctx, o, geo.pieces[i], paths[i])
       add(i, ctx)
       flush('back')
     }

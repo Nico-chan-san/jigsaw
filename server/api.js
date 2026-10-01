@@ -159,19 +159,19 @@ function createApi(dbFile) {
   const q = {
     list: db.prepare(`
       SELECT r.id, r.name, r.created, r.cols, r.rows, r.shape, r.thumb, r.owner, r.private,
-             COUNT(p.idx) AS n, COUNT(DISTINCT p.g) AS groups,
+             CASE WHEN r.units > 0 THEN r.units ELSE COUNT(p.idx) END AS n, COUNT(DISTINCT p.g) AS groups,
              (SELECT COALESCE(SUM(t.seconds), 0) FROM times t WHERE t.room_id = r.id) AS seconds
       FROM rooms r LEFT JOIN pieces p ON p.room_id = r.id
       WHERE r.private = 0 OR r.id IN (SELECT room_id FROM room_players WHERE player_id = ?)
       GROUP BY r.id ORDER BY r.created DESC`),
     room: db.prepare(
-      'SELECT id, name, created, cols, rows, shape, seed, width, height, annoying, owner, private FROM rooms WHERE id = ?',
+      'SELECT id, name, created, cols, rows, shape, seed, width, height, annoying, long_pieces AS longPieces, owner, private FROM rooms WHERE id = ?',
     ),
     image: db.prepare('SELECT image, image_type FROM rooms WHERE id = ?'),
     pieces: db.prepare('SELECT idx AS i, x, y, r, g, by, f FROM pieces WHERE room_id = ? ORDER BY idx'),
     insertRoom: db.prepare(`
-      INSERT INTO rooms (id, name, created, cols, rows, shape, seed, width, height, image, image_type, thumb, annoying, owner, private)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+      INSERT INTO rooms (id, name, created, cols, rows, shape, seed, width, height, image, image_type, thumb, annoying, owner, private, long_pieces, units)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     insertPiece: db.prepare(
       'INSERT INTO pieces (room_id, idx, x, y, r, g, by, f) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     ),
@@ -616,6 +616,9 @@ function createApi(dbFile) {
               b.annoying ? 1 : 0,
               owner.id,
               hidden ? 1 : 0,
+              b.longPieces ? 1 : 0,
+              // The cells of a long piece start out in one group, so there are as many pieces as groups.
+              b.longPieces ? new Set(b.pieces.map((p) => p.g)).size : 0,
             )
             if (hidden) q.join.run(id, owner.id, Date.now())
             for (const p of b.pieces) q.insertPiece.run(id, p.i, p.x, p.y, p.r, p.g, null, p.f ? 1 : 0)

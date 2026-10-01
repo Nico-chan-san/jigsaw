@@ -21,6 +21,7 @@ import Podium, { PodiumIcon } from '../components/Podium.jsx'
 import Reactions from '../components/Reactions.jsx'
 import Timers from '../components/Timers.jsx'
 import Celebration from '../components/Celebration.jsx'
+import DevMenu from '../components/DevMenu.jsx'
 import { useLinger } from '../lib/linger.js'
 import { NoteButton, NotesLayer } from '../components/Notes.jsx'
 import { TrayButton } from '../components/Trays.jsx'
@@ -89,7 +90,7 @@ function takeLocalRefs(id) {
 }
 
 export default function Room({ id }) {
-  const { name, player, playerId, theme, ensureName, requireName, setDialog } = useApp()
+  const { name, player, playerId, theme, ensureName, requireName, setDialog, devMenu } = useApp()
   const me = useRef(playerId)
   me.current = playerId
   const sockRef = useRef(null)
@@ -137,10 +138,17 @@ export default function Room({ id }) {
   const closePodium = useCallback(() => setPodium(false), [])
   const [podiumShown, podiumClosing] = useLinger(podium)
   const [party, setParty] = useState(false)
+  // Bumped to play the celebration again from the start, see the dev menu.
+  const [partyKey, setPartyKey] = useState(0)
   // After the celebration, bring up the podium.
   const endParty = useCallback(() => {
     setParty(false)
     setPodium(true)
+  }, [])
+  const celebrate = useCallback(() => {
+    setPodium(false)
+    setPartyKey((k) => k + 1)
+    setParty(true)
   }, [])
 
   useEffect(() => {
@@ -470,7 +478,28 @@ export default function Room({ id }) {
       <div className="float br">{view}</div>
       <div className="float tr">{account}</div>
       {helpShown && <Help onClose={closeHelp} closing={helpClosing} />}
-      {party && <Celebration onDone={endParty} />}
+      {party && <Celebration key={partyKey} onDone={endParty} />}
+      {import.meta.env.DEV && devMenu && engine && (
+        <DevMenu
+          onConnect={() => engine.devConnect()}
+          onRestart={() => {
+            engine.devRestart()
+            store.set(`celebrated:${id}`, null)
+            setDone(false)
+            setParty(false)
+            setPodium(false)
+          }}
+          onSolve={() => {
+            // Celebrate as if for the first time.
+            store.set(`celebrated:${id}`, null)
+            engine.devSolve()
+          }}
+          onCelebrate={() => {
+            engine.fit()
+            celebrate()
+          }}
+        />
+      )}
       {engine && done && (
         <button className="podium-btn" onClick={() => setPodium(true)} aria-label="Podium" title="Top players">
           <PodiumIcon />

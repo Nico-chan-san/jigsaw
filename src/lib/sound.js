@@ -19,49 +19,66 @@ function audio() {
 }
 for (const ev of ['pointerdown', 'keydown']) window.addEventListener(ev, () => on && audio(), { capture: true, passive: true })
 
-// A short wooden click, like two pieces pressed together. Bigger joins (more seams at once) sound a
-// little lower and fuller; other players' joins are quieter than your own.
-export function playSnap({ seams = 1, local = true } = {}) {
+// A soft wooden clack, like two blocks knocked together: a sharp tick, a short ringing body and a faint
+// thump underneath. It's made once, sample by sample, and every join plays that same recording, so it
+// sounds the same every time, the last join too. Scheduling tones to start and fade at set times
+// doesn't: when the page is busy right after a join (finishing the jigsaw is), they reach the audio
+// late and most of the clack is already over by the time it plays.
+let clack = null
+
+function makeClack(rate) {
+  const n = Math.round(rate * 0.075)
+  const buf = new AudioBuffer({ length: n, sampleRate: rate })
+  const out = buf.getChannelData(0)
+  // A tone that hits at once (in 2 ms) and fades away exponentially over decay seconds, sliding from
+  // one frequency to another.
+  const hit = (from, to, peak, decay) => {
+    let phase = 0
+    for (let i = 0; i < n; i++) {
+      const t = i / rate
+      if (t > decay) break
+      const f = from * (to / from) ** (t / decay)
+      phase += (2 * Math.PI * f) / rate
+      const env = t < 0.002 ? 0.0001 * (peak / 0.0001) ** (t / 0.002) : peak * (0.0001 / peak) ** ((t - 0.002) / (decay - 0.002))
+      out[i] += Math.sin(phase) * env
+    }
+  }
+  // The body: a few out of tune partials, like a wood block ringing. Higher ones fade first.
+  const base = 620
+  hit(base, base, 0.6, 0.06)
+  hit(base * 2.4, base * 2.4, 0.25, 0.035)
+  hit(base * 4.1, base * 4.1, 0.12, 0.018)
+  // The thump: a quiet low tone that drops a little, giving it some weight.
+  hit(160, 120, 0.3, 0.04)
+  // The tick: a very short burst of bright noise, through a band pass filter.
+  const w = (2 * Math.PI * 3800) / rate
+  const alpha = Math.sin(w) / (2 * 0.9)
+  const a0 = 1 + alpha
+  const [b0, b2, a1, a2] = [alpha / a0, -alpha / a0, (-2 * Math.cos(w)) / a0, (1 - alpha) / a0]
+  let [x1, x2, y1, y2] = [0, 0, 0, 0]
+  const len = Math.round(rate * 0.012)
+  for (let i = 0; i < n; i++) {
+    const x = i < len ? (Math.random() * 2 - 1) * (1 - i / len) ** 4 : 0
+    const y = b0 * x + b2 * x2 - a1 * y1 - a2 * y2
+    ;[x2, x1, y2, y1] = [x1, x, y1, y]
+    out[i] += y * 0.4
+  }
+  return buf
+}
+
+// Other players' joins are quieter than your own, and every join is a touch higher or lower.
+export function playSnap({ local = true } = {}) {
   if (!on) return
   const a = audio()
   if (!a) return
-  const t = a.currentTime + 0.01
-  const size = Math.min(1, (seams - 1) / 8)
-  const volume = (local ? 0.5 : 0.18) * (1 + size * 0.4)
-  const pitch = (1 - size * 0.25) * (0.94 + Math.random() * 0.12)
-
-  const out = a.createGain()
-  out.gain.value = volume
-  out.connect(a.destination)
-
-  // The knock: a tone that drops fast.
-  const tone = a.createOscillator()
-  const toneGain = a.createGain()
-  tone.type = 'triangle'
-  tone.frequency.setValueAtTime(1100 * pitch, t)
-  tone.frequency.exponentialRampToValueAtTime(420 * pitch, t + 0.05)
-  toneGain.gain.setValueAtTime(0.0001, t)
-  toneGain.gain.exponentialRampToValueAtTime(1, t + 0.003)
-  toneGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.09)
-  tone.connect(toneGain).connect(out)
-  tone.start(t)
-  tone.stop(t + 0.1)
-
-  // The click: a burst of filtered noise on top.
-  const len = Math.round(a.sampleRate * 0.03)
-  const buf = a.createBuffer(1, len, a.sampleRate)
-  const data = buf.getChannelData(0)
-  for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len) ** 3
-  const noise = a.createBufferSource()
-  noise.buffer = buf
-  const band = a.createBiquadFilter()
-  band.type = 'bandpass'
-  band.frequency.value = 2600 * pitch
-  band.Q.value = 1.2
-  const noiseGain = a.createGain()
-  noiseGain.gain.value = 0.7
-  noise.connect(band).connect(noiseGain).connect(out)
-  noise.start(t)
-
-  tone.onended = () => out.disconnect()
+  if (clack?.sampleRate !== a.sampleRate) clack = makeClack(a.sampleRate)
+  const src = a.createBufferSource()
+  src.buffer = clack
+  src.playbackRate.value = 0.92 + Math.random() * 0.16
+  const gain = a.createGain()
+  gain.gain.value = local ? 0.4 : 0.15
+  src.connect(gain).connect(a.destination)
+  src.onended = () => gain.disconnect()
+  // No start time: it plays as soon as it reaches the audio, however late that is, and all of it.
+  src.start()
 }
