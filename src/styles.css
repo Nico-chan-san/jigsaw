@@ -1578,7 +1578,17 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 .help-row dt {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
+}
+.key-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.key-sep {
+  color: var(--muted);
+  font-size: 12px;
 }
 .help-row dd {
   margin: 0;

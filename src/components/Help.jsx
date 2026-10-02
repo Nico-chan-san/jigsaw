@@ -2,6 +2,27 @@ import Dialog from './Dialog.jsx'
 
 const Key = ({ children }) => <kbd className="key">{children}</kbd>
 
+const IS_MAC = /mac|iphone|ipad/i.test(navigator.userAgentData?.platform || navigator.platform || '')
+const MOD = IS_MAC ? 'Cmd' : 'Ctrl'
+
+// Keys pressed together, shown as Shift + Space.
+const Combo = ({ keys }) =>
+  keys.map((k, i) => (
+    <span key={k} className="key-group">
+      {i > 0 && <span className="key-sep">+</span>}
+      <Key>{k}</Key>
+    </span>
+  ))
+
+// Keys that each do the same thing, shown as Delete / Backspace.
+const Either = ({ keys }) =>
+  keys.map((k, i) => (
+    <span key={k} className="key-group">
+      {i > 0 && <span className="key-sep">/</span>}
+      <Key>{k}</Key>
+    </span>
+  ))
+
 const SECTIONS = [
   {
     title: 'Mouse',
@@ -30,28 +51,10 @@ const SECTIONS = [
         'Pan (arrow keys too), faster the longer you hold',
       ],
       [<Key key="sp">Space</Key>, "Rotate held or selected pieces, or a selected tray's"],
-      [
-        <>
-          <Key>Shift</Key>
-          <Key>Space</Key>
-        </>,
-        'Rotate them all together, around their centre',
-      ],
+      [<Combo key="ss" keys={['Shift', 'Space']} />, 'Rotate them all together, around their centre'],
       [<Key key="g">G</Key>, "Sort selected pieces into a grid, or a selected tray's"],
-      [
-        <>
-          <Key>Shift</Key>
-          <Key>G</Key>
-        </>,
-        'Sort them into a grid in random order',
-      ],
-      [
-        <>
-          <Key>+</Key>
-          <Key>-</Key>
-        </>,
-        'Zoom',
-      ],
+      [<Combo key="sg" keys={['Shift', 'G']} />, 'Sort them into a grid in random order'],
+      [<Either key="z" keys={['+', '-']} />, 'Zoom'],
       [<Key key="c">C</Key>, 'Fit to screen'],
       [<Key key="f">F</Key>, 'Fullscreen'],
       [<Key key="h">H</Key>, 'This help'],
@@ -62,21 +65,9 @@ const SECTIONS = [
       [<Key key="i">I</Key>, 'New image'],
       [<Key key="r">R</Key>, 'Reactions'],
       [<Key key="sh">Shift</Key>, 'Add to selection'],
-      [
-        <>
-          <Key>Cmd</Key>
-          <Key>A</Key>
-        </>,
-        'Select everything (Ctrl A on Windows)',
-      ],
+      [<Combo key="sa" keys={[MOD, 'A']} />, 'Select everything'],
       [<Key key="e">Esc</Key>, 'Clear selection'],
-      [
-        <>
-          <Key>Delete</Key>
-          <Key>Backspace</Key>
-        </>,
-        'Remove selected notes, images and tray',
-      ],
+      [<Either key="del" keys={['Delete', 'Backspace']} />, 'Remove selected notes, images and tray'],
     ],
   },
   {
