@@ -2,6 +2,9 @@
 
 A multiplayer jigsaw puzzle app. The frontend is React, built with Vite. The backend is a small JSON and WebSocket API backed by SQLite, which runs as a Vite plugin (`server/api.js`), so there is no separate backend process to start.
 
+https://github.com/user-attachments/assets/e7aee30f-cdcd-469a-b9dd-854b7db83120
+
+
 ## Requirements
 
 - Node.js 22.13 or newer (the server uses the built-in `node:sqlite` module)
