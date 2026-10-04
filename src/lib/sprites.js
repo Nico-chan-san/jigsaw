@@ -71,29 +71,6 @@ export function drawFront(ctx, { geo, room, image, margin: m, sc }, p, path) {
   ctx.stroke(long ? long.rim : path)
 }
 
-// The back of a piece: plain cardboard in the same outline.
-export function drawBack(ctx, { geo, sc }, p, path) {
-  const { S } = geo
-  const c = ctx.canvas
-  ctx.setTransform(sc, 0, 0, sc, c.width / 2, c.height / 2)
-  const long = longPaths(p, S * GROW)
-  shadow(ctx, S, sc, path, long, '#cdbd9f')
-  // The cut shadow pass can take a sliver of the cardboard with it; fill it in again.
-  if (long) {
-    ctx.fillStyle = '#cdbd9f'
-    ctx.fill(long.fill)
-  }
-  ctx.save()
-  ctx.clip(long ? long.fill : path)
-  ctx.lineWidth = S * 0.04
-  ctx.strokeStyle = 'rgba(255,255,255,0.3)'
-  ctx.stroke(long ? long.rim : path)
-  ctx.restore()
-  ctx.lineWidth = 1 / sc
-  ctx.strokeStyle = 'rgba(0,0,0,0.35)'
-  ctx.stroke(long ? long.rim : path)
-}
-
 // The sprite followed by its halved copies. make(w, h) returns a blank canvas of that size. Each
 // copy covers the same area as the sprite, so all of them are drawn at the sprite's world size.
 export function levels(src, make) {

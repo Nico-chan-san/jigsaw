@@ -1,14 +1,14 @@
-// Builds every piece's sprites off the main thread and posts them back in batches as ImageBitmaps:
-// first the fronts, then the backs of the face down pieces. Posts { kind: 'fail' } if it can't draw
+// Builds every piece's sprites off the main thread and posts them back in batches as ImageBitmaps.
+// Posts { kind: 'fail' } if it can't draw
 // here, and the engine builds whatever is missing itself.
 import { buildPuzzle, outlinePath } from './geometry.js'
-import { drawBack, drawFront, levels, spriteSize } from './sprites.js'
+import { drawFront, levels, spriteSize } from './sprites.js'
 
 // A batch is posted after about this long (ms), so sprites show up while the rest are drawn.
 const BATCH_MS = 16
 
 self.onmessage = (e) => {
-  const { room, image, margin, sc, backs } = e.data
+  const { room, image, margin, sc } = e.data
   try {
     const geo = buildPuzzle(room)
     const o = { geo, room, image, margin, sc }
@@ -42,13 +42,6 @@ self.onmessage = (e) => {
       flush('front')
     }
     flush('front', true)
-    for (const i of backs) {
-      const ctx = blank()
-      drawBack(ctx, o, geo.pieces[i], paths[i])
-      add(i, ctx)
-      flush('back')
-    }
-    flush('back', true)
     self.postMessage({ kind: 'done' })
   } catch (err) {
     self.postMessage({ kind: 'fail', message: String(err) })

@@ -1,9 +1,16 @@
 # Changelog
 
+## 4 October 2026
+
+- Hardcore mode is gone. Jigsaws that were made with it now have every piece face up.
+- The account button is no longer in the top right corner. Find your account under **Settings** > **Account**.
+- Picking a name as a new player takes you straight in, without the passphrase dialog after it. Your passphrase is still under **Settings** > **Account**.
+- Zoom and fullscreen in the bottom right are now two separate bars instead of one bar with a divider.
+
 ## 1 October 2026
 
 - Three new piece shapes for new jigsaws: **Wobbly**, **Mixed** and **Jagged**. Every piece is a little different in size and form, with crooked edges, and the tabs and holes vary from edge to edge. Mixed puts different kinds of tabs in one jigsaw, Jagged has straight lines and sharp corners.
-- **Big pieces**, a new option for new jigsaws: some pieces are two to five pieces in one, in all kinds of shapes: long, L, T, S, square and more. They work with every piece shape, and a big piece moves, turns and flips as one.
+- **Big pieces**, a new option for new jigsaws: some pieces are two to five pieces in one, in all kinds of shapes: long, L, T, S, square and more. They work with every piece shape, and a big piece moves and turns as one.
 - Round, Square and Arrow are no longer offered for new jigsaws. Jigsaws that already have them keep their pieces.
 - The shape list in the new jigsaw form stays open when you pick a shape, so you can try them one after another. Click outside it or press `Esc` to close it.
 - Pieces joining now make a soft wooden clack. It sounds the same for every join, the last one too.

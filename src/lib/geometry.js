@@ -572,30 +572,6 @@ export function scatter(room, seed = room.seed) {
   return out
 }
 
-// Tips every piece out in one overlapping heap in the middle, like emptying the box onto
-// the table: denser towards the centre, random quarter turns, about half of them face down.
-export function pile(room, seed = room.seed) {
-  const { cols, rows, width, height } = room
-  const n = cols * rows
-  const size = Math.max(width / cols, height / rows)
-  const r = rng(seed ^ 0x51ed2701)
-  const R = Math.sqrt(n) * size * 0.45
-  const out = Array.from({ length: n }, (_, i) => {
-    const a = r() * 2 * Math.PI
-    const d = R * Math.sqrt(r()) * (0.35 + 0.65 * r())
-    return { i, x: Math.cos(a) * d, y: Math.sin(a) * d, r: Math.floor(r() * 4), g: i, f: r() < 0.5 ? 1 : 0 }
-  })
-  // The rest of a long piece lies with its first cell, face up or down with it.
-  for (const cells of piecesOf(room)) {
-    const a = out[cells[0]]
-    for (const i of cells.slice(1)) {
-      const [ox, oy] = offset(room, cells[0], i, a.r)
-      out[i] = { i, x: a.x + ox, y: a.y + oy, r: a.r, g: cells[0], f: a.f }
-    }
-  }
-  return out
-}
-
 // The jigsaw the warped shapes' sample pieces come from: its middle piece has two tabs and two holes.
 const SAMPLE_SEED = 15
 

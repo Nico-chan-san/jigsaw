@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import qrcode from 'qrcode-generator'
 import { api } from '../lib/api.js'
 import { useApp } from '../App.jsx'
-import { useLinger } from '../lib/linger.js'
 import { EmailForm, looksLikePassphrase, Passphrase, PassphraseWarning } from './Account.jsx'
 import { Key, Logout, User } from './icons.jsx'
 import Dialog from './Dialog.jsx'
@@ -103,27 +102,6 @@ function PhoneLink({ player }) {
           </span>
         </button>
       )}
-    </>
-  )
-}
-
-// Icon button that opens the account dialog.
-export function AccountButton() {
-  const { name } = useApp()
-  const [open, setOpen] = useState(false)
-  const close = useCallback(() => setOpen(false), [])
-  const [shown, closing] = useLinger(open)
-  return (
-    <>
-      <button
-        className={`icon-btn${open ? ' on' : ''}`}
-        onClick={() => setOpen(true)}
-        aria-label="Account"
-        title={name ? `Account: ${name}` : 'Account'}
-      >
-        <User />
-      </button>
-      {shown && <AccountDialog onClose={close} closing={closing} />}
     </>
   )
 }

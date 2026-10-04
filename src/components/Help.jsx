@@ -28,7 +28,7 @@ const SECTIONS = [
     title: 'Mouse',
     rows: [
       [<Key key="lp">Drag a piece</Key>, 'Move it'],
-      [<Key key="lc">Click a piece</Key>, 'Select it (and turn it face up in hardcore mode)'],
+      [<Key key="lc">Click a piece</Key>, 'Select it'],
       [<Key key="lt">Drag the table</Key>, 'Select'],
       [<Key key="tr">Drag a tray</Key>, 'Move it, with the pieces in it'],
       [<Key key="tc">Click a tray</Key>, 'Select it: space, G and Delete then work on it'],

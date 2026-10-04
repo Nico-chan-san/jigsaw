@@ -15,7 +15,6 @@ import {
 } from '../components/icons.jsx'
 import Help from '../components/Help.jsx'
 import Settings from '../components/Settings.jsx'
-import { AccountButton } from '../components/AccountDialog.jsx'
 import Players, { rankPlayers } from '../components/Players.jsx'
 import Podium, { PodiumIcon } from '../components/Podium.jsx'
 import Reactions from '../components/Reactions.jsx'
@@ -409,11 +408,10 @@ export default function Room({ id }) {
         <HelpIcon />
         <KeyHint k="H" />
       </button>
-      <AccountButton />
       <Settings privateRoom={!!data?.private} />
     </>
   )
-  const view = (
+  const zoom = (
     <>
       <button
         className="icon-btn"
@@ -439,21 +437,20 @@ export default function Room({ id }) {
         <Plus />
         <KeyHint k="+" />
       </button>
-      {canFullscreen() && <span className="sep" />}
-      {canFullscreen() && (
-        <button
-          className={`icon-btn${fullscreen ? ' on' : ''}`}
-          onClick={toggleFullscreen}
-          aria-pressed={fullscreen}
-          aria-label="Fullscreen"
-          aria-keyshortcuts="F"
-          title={fullscreen ? 'Leave fullscreen (F)' : 'Fullscreen (F)'}
-        >
-          {fullscreen ? <ExitFullscreen /> : <Fullscreen />}
-          <KeyHint k="F" />
-        </button>
-      )}
     </>
+  )
+  const full = canFullscreen() && (
+    <button
+      className={`icon-btn${fullscreen ? ' on' : ''}`}
+      onClick={toggleFullscreen}
+      aria-pressed={fullscreen}
+      aria-label="Fullscreen"
+      aria-keyshortcuts="F"
+      title={fullscreen ? 'Leave fullscreen (F)' : 'Fullscreen (F)'}
+    >
+      {fullscreen ? <ExitFullscreen /> : <Fullscreen />}
+      <KeyHint k="F" />
+    </button>
   )
 
   return (
@@ -491,7 +488,10 @@ export default function Room({ id }) {
       <canvas ref={cursors} className="cursors" />
       <div className="float tl">{nav}</div>
       {play && <div className="play-tools tc">{play}</div>}
-      <div className="float br">{view}</div>
+      <div className="br">
+        <div className="float">{zoom}</div>
+        {full && <div className="float">{full}</div>}
+      </div>
       <div className="float tr">{account}</div>
       {helpShown && <Help onClose={closeHelp} closing={helpClosing} />}
       {party && <Celebration key={partyKey} onDone={endParty} />}

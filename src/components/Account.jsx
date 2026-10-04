@@ -121,23 +121,23 @@ const TABS = [
 ]
 
 // Modal for signing up with a name ('name'), logging in with a passphrase ('login') or with an
-// email and password ('email'), one tab each, and showing a new passphrase ('show', after signing
-// up, or with player given). 'returning' greets someone whose browser knew them only by name (from
-// before passphrases) when that name already has a passphrase: they log in with it, or start fresh.
-// onSignUp, onLogin and onLoginEmail resolve with the player.
+// email and password ('email'), one tab each, or showing a player's passphrase ('show', with player
+// given). A new player goes straight in; their passphrase is under Account. 'returning' greets
+// someone whose browser knew them only by name (from before passphrases) when that name already has
+// a passphrase: they log in with it, or start fresh. onSignUp, onLogin and onLoginEmail resolve with
+// the player.
 export default function AccountPrompt({ mode: start, name, player, onSignUp, onLogin, onLoginEmail, onDone, onCancel }) {
   // Log in opens on the first tab too, New player.
   const [mode, setMode] = useState(start === 'login' ? 'name' : start)
   const [value, setValue] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [made, setMade] = useState(player || null)
+  const made = player
 
   const fresh = async () => {
     setBusy(true)
     try {
-      setMade(await onSignUp(name))
-      setMode('show')
+      onDone(await onSignUp(name))
     } catch {
       setError('Could not save your name, try again')
     } finally {
@@ -164,10 +164,7 @@ export default function AccountPrompt({ mode: start, name, player, onSignUp, onL
     setError('')
     try {
       if (mode !== 'name') onDone(await onLogin(v))
-      else {
-        setMade(await onSignUp(v.slice(0, 32)))
-        setMode('show')
-      }
+      else onDone(await onSignUp(v.slice(0, 32)))
     } catch (err) {
       setError(mode !== 'name' ? err.message || 'Unknown passphrase' : 'Could not save your name, try again')
     } finally {
@@ -176,7 +173,7 @@ export default function AccountPrompt({ mode: start, name, player, onSignUp, onL
   }
 
   if (mode === 'show') {
-    // Escape or a press outside never throws away a player that was just made.
+    // Escape or a press outside never throws away the player.
     return (
       <Dialog title="Your passphrase" className="prompt" onClose={() => onDone(made)} closeButton={false}>
         <p className="modal-text">

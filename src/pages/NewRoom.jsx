@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../lib/api.js'
-import { SHAPES, buildPuzzle, gridFor, longPaths, outlinePath, pile, samplePiecePath, scatter } from '../lib/geometry.js'
+import { SHAPES, buildPuzzle, gridFor, longPaths, outlinePath, samplePiecePath, scatter } from '../lib/geometry.js'
 import { useApp } from '../App.jsx'
 import { Arrow, Chevron, Close, Upload } from '../components/icons.jsx'
 import InviteList from '../components/Invite.jsx'
@@ -197,7 +197,6 @@ export default function NewRoom({ bar }) {
   // What's in the number field while typing; null shows the actual piece count.
   const [typed, setTyped] = useState(null)
   const [shape, setShape] = useState('classic')
-  const [hardcore, setHardcore] = useState(false)
   const [longPieces, setLongPieces] = useState(false)
   const [hidden, setHidden] = useState(false)
   // Players to email the private jigsaw's link to, by id.
@@ -262,10 +261,9 @@ export default function NewRoom({ bar }) {
         name: name.trim() || 'Jigsaw',
         image: full.data,
         thumb: thumb.data,
-        annoying: hardcore,
         private: hidden,
         invite: hidden ? [...invited] : [],
-        pieces: hardcore ? pile(room) : scatter(room),
+        pieces: scatter(room),
         passphrase: currentPlayer()?.passphrase,
       })
       openRoom(id)
@@ -391,7 +389,6 @@ export default function NewRoom({ bar }) {
           <h2 className="label">Options</h2>
           <div className="options">
             {option(longPieces, setLongPieces, 'Big pieces', 'Some pieces are two to five in one: long, L, T and other shapes.')}
-            {option(hardcore, setHardcore, 'Hardcore mode', 'One messy pile, many pieces face down.')}
             {option(hidden, setHidden, 'Private room', 'Only people with the link can join.')}
             {hidden && (
               <div className="options-invite">

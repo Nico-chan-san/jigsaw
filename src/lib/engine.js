@@ -1,6 +1,6 @@
 // Imperative canvas engine: rendering (with WebGPU, see gpu.js), camera, dragging, rotation and snapping.
-import { buildPuzzle, outlinePath, pack, packExtent, pile, scatter, unitCells } from './geometry.js'
-import { drawBack, drawFront, levels, MIPS, spriteSize } from './sprites.js'
+import { buildPuzzle, outlinePath, pack, packExtent, scatter, unitCells } from './geometry.js'
+import { drawFront, levels, MIPS, spriteSize } from './sprites.js'
 import { createGpu, PIECE_FLOATS, REF_FLOATS, TRAY_FLOATS } from './gpu.js'
 
 const Q = Math.PI / 2
@@ -15,8 +15,6 @@ const ease = (dt, ms) => 1 - Math.exp(-dt / ms)
 const r2 = (v) => Math.round(v * 100) / 100
 // Live drag updates are throttled to this interval (ms).
 const LIVE_MS = 33
-// Length of the flip animation (ms), and how far a press may move and still count as a click.
-const FLIP_MS = 420
 // The burst where two pieces join: how long it lasts, after waiting for the pieces to land.
 const POP_MS = 520
 const POP_DELAY = 80
@@ -37,8 +35,8 @@ export const TRAY_COLORS = {
 }
 // How far the table reaches from the middle of the pieces on every side, in jigsaw sizes.
 const TABLE = 10
+// How far a press may move and still count as a click.
 const CLICK_PX = 5
-const CLICK_MS = 400
 // Screen-space size of reference image handles.
 const HANDLE = 7
 // Cursor updates are throttled to this interval (ms); idle cursors vanish after CURSOR_IDLE.
@@ -149,11 +147,6 @@ export class Engine {
     this.r = new Int8Array(n)
     this.g = new Int32Array(n)
     this.by = new Array(n).fill(null)
-    // Face down pieces (hardcore mode), their back sprites (like sprites below), and flips in
-    // progress: i -> start time.
-    this.f = new Uint8Array(n)
-    this.backs = new Array(n)
-    this.flips = new Map()
     // Pieces turned in place on the table, still animating: i -> { cx, cy, a } (a in radians, decays to
     // 0), one object shared by all the pieces of a module.
     this.turns = new Map()
@@ -179,7 +172,6 @@ export class Engine {
       this.r[p.i] = p.r
       this.g[p.i] = p.g
       this.by[p.i] = p.by || null
-      this.f[p.i] = p.f ? 1 : 0
     }
     const sizes = new Map()
     for (let i = 0; i < n; i++) sizes.set(this.g[i], (sizes.get(this.g[i]) || 0) + 1)
@@ -263,16 +255,12 @@ export class Engine {
   }
 
   // Starts WebGPU, puts every sprite made so far in its atlas and shows the GPU canvas. Sprites made
-  // later go there as they come, see setSprite(). Backs get cells after the fronts' as needed: at
-  // most one per piece in hardcore mode, where pieces lie face down.
+  // later go there as they come, see setSprite().
   async startGpu() {
-    const backs = this.room.annoying ? this.n : this.f.reduce((a, f) => a + f, 0)
     const [spw, sph] = spriteSize(this.geo, this.margin, this.spriteScale)
-    const gpu = await createGpu(this.gpuEl, { cells: this.n + backs, spw, sph, levels: MIPS + 1 })
+    const gpu = await createGpu(this.gpuEl, { cells: this.n, spw, sph, levels: MIPS + 1 })
     if (this.raf === -1) return gpu.destroy()
     this.gpu = gpu
-    this.backCells = new Map()
-    this.backCap = this.n + backs
     // Per frame: the pieces' instances (still, active, lifted, then the outlined ones again), trays and images.
     this.gi = new Float32Array((2 * this.n + 8) * PIECE_FLOATS)
     this.giu = new Uint32Array(this.gi.buffer)
@@ -281,31 +269,12 @@ export class Engine {
     gpu.onLost = (why) => console.error('WebGPU device lost:', why)
     gpu.setRefImage(this.refImg)
     this.sprites.forEach((lv, i) => lv && gpu.upload(i, lv))
-    this.backs.forEach((lv, i) => lv && this.uploadBack(i, lv))
     this.canvas.before(this.gpuEl)
     this.resize()
   }
 
-  // Puts a back sprite in the atlas, in the next free back cell.
-  uploadBack(i, lv) {
-    if (!this.gpu) return
-    let c = this.backCells.get(i)
-    if (c === undefined) {
-      if (this.backCells.size >= this.backCap - this.n) return
-      c = this.n + this.backCells.size
-      this.backCells.set(i, c)
-    }
-    this.gpu.upload(c, lv)
-  }
-
-  // A piece's sprite levels (front, or back), kept and sent to the GPU.
-  setSprite(i, lv, back = false) {
-    if (back) {
-      if (this.backs[i]) return
-      this.backs[i] = lv
-      this.uploadBack(i, lv)
-      return
-    }
+  // A piece's sprite levels, kept and sent to the GPU.
+  setSprite(i, lv) {
     if (!this.sprites[i]) this.built++
     this.sprites[i] = lv
     this.gpu?.upload(i, lv)
@@ -679,7 +648,7 @@ export class Engine {
     const ids = [...this.withGroups(this.sel)].filter((j) => !(this.held.get(j) > now))
     if (ids.length) {
       this.startDrag(ids, wx, wy, e.pointerId, sx, sy)
-      // Only a press on a piece can be a click that flips it.
+      // Only a press on a piece can be a click that selects it.
       if (!from.piece) this.drag.moved = true
     }
     const notes = this.notes?.get().filter((n) => this.selNotes.has(n.id)) || []
@@ -775,9 +744,6 @@ export class Engine {
   // a frame at a time. The worker is kept until destroy(), even when done: Chrome frees the bitmaps
   // it made when it ends. this.spriteWorker is set only while it is still sending sprites.
   startSprites() {
-    // Backs are only ever needed for pieces that are face down now: pieces never turn back over.
-    this.backQueue = []
-    for (let i = 0; i < this.n; i++) if (this.f[i]) this.backQueue.push(i)
     this.buildAt = 0
     this.spriteWorker = null
     if (typeof Worker !== 'function' || typeof OffscreenCanvas !== 'function' || typeof createImageBitmap !== 'function') return
@@ -797,10 +763,7 @@ export class Engine {
       if (data.kind === 'front') {
         for (const { i, lv } of data.items) this.setSprite(i, lv)
         this.invalidate()
-      } else if (data.kind === 'back') {
-        for (const { i, lv } of data.items) this.setSprite(i, lv, true)
       } else if (data.kind === 'done') {
-        this.backQueue = []
         stop()
       } else stop()
     }
@@ -808,22 +771,18 @@ export class Engine {
     createImageBitmap(this.image)
       .then((image) => {
         if (this.spriteWorker !== worker) return
-        const msg = { room: this.room, image, margin: this.margin, sc: this.spriteScale, backs: this.backQueue }
+        const msg = { room: this.room, image, margin: this.margin, sc: this.spriteScale }
         worker.postMessage(msg, [image])
       })
       .catch(stop)
   }
 
-  // Main thread fallback: builds sprites until the deadline, fronts first.
+  // Main thread fallback: builds sprites until the deadline.
   buildSome(until) {
     while (this.buildAt < this.n && performance.now() < until) {
       const i = this.buildAt++
       if (this.sprites[i]) continue
       this.setSprite(i, levels(this.makeSprite(i), makeCanvas))
-    }
-    while (this.buildAt >= this.n && this.backQueue.length && performance.now() < until) {
-      const i = this.backQueue.pop()
-      if (!this.backs[i]) this.setSprite(i, levels(this.makeBack(i), makeCanvas), true)
     }
   }
 
@@ -837,34 +796,6 @@ export class Engine {
     return c
   }
 
-  // The back of a piece: plain cardboard in the same outline. It is drawn mirrored, see face().
-  makeBack(i) {
-    const c = makeCanvas(...spriteSize(this.geo, this.margin, this.spriteScale))
-    drawBack(c.getContext('2d'), this.spriteOpts(), this.geo.pieces[i], this.paths[i])
-    return c
-  }
-
-  // What to draw for piece i: returns its sprite levels (or nothing yet), and sets this.fsx to the
-  // horizontal scale in the piece's own frame and this.flift to an extra lift. Face down pieces are
-  // mirrored (fsx = -1), as a real piece turned over is. A flip in progress squeezes the piece
-  // through its edge and swaps sprites halfway.
-  face(i, still = false) {
-    let sx = this.f[i] ? -1 : 1
-    let lift = 1
-    const t0 = still || !this.flips.size ? undefined : this.flips.get(i)
-    if (t0 !== undefined) {
-      const p = Math.min(1, (performance.now() - t0) / FLIP_MS)
-      const e = p < 0.5 ? 2 * p * p : 1 - 2 * (1 - p) * (1 - p)
-      sx = -sx * Math.cos(Math.PI * e)
-      lift = 1 + 0.18 * Math.sin(Math.PI * e)
-    }
-    this.fsx = sx
-    this.flift = lift
-    if (sx >= 0) return this.sprites[i]
-    if (!this.backs[i]) this.setSprite(i, levels(this.makeBack(i), makeCanvas), true)
-    return this.backs[i]
-  }
-
   hit(wx, wy) {
     const R = this.radius
     for (let k = this.order.length - 1; k >= 0; k--) {
@@ -873,8 +804,7 @@ export class Engine {
       const dy = wy - this.y[i]
       if (dx > R || dx < -R || dy > R || dy < -R) continue
       const [rx, ly] = rot(dx, dy, -this.r[i])
-      const lx = this.f[i] ? -rx : rx
-      if (this.hitCtx.isPointInPath(this.paths[i], lx, ly)) return i
+      if (this.hitCtx.isPointInPath(this.paths[i], rx, ly)) return i
     }
     return -1
   }
@@ -1054,9 +984,7 @@ export class Engine {
     this.pointers.delete(e.pointerId)
     if (this.drag && e.pointerId === this.drag.pointer) {
       const d = this.drag
-      const click = this.room.annoying && this.onePiece(d.ids) && !d.moved && performance.now() - d.t0 < CLICK_MS
       this.drop()
-      if (click) this.flip(d.ids[0])
       // Clicking a piece without dragging selects it (its whole module), and only it.
       if (!d.moved && d.piece !== undefined) this.setSelection(new Set(this.members(this.g[d.piece])))
     }
@@ -1246,14 +1174,12 @@ export class Engine {
       tx: new Float64Array(ids.length),
       ty: new Float64Array(ids.length),
       spinning: false,
-      // A press that neither moves nor turns anything is a click (flips a piece in hardcore mode).
-      t0: performance.now(),
+      // A press that neither moves nor turns anything is a click.
       sx0: sx,
       sy0: sy,
       moved: false,
     }
     for (const i of ids) {
-      this.flips.delete(i)
       this.turns.delete(i)
       this.moving.delete(i)
     }
@@ -1427,7 +1353,6 @@ export class Engine {
         this.x[i] = cx + rx
         this.y[i] = cy + ry
         this.r[i] = mod4(this.r[i] + dir)
-        this.flips.delete(i)
         this.turns.set(i, t)
       }
     }
@@ -1479,7 +1404,7 @@ export class Engine {
       type: 'moves',
       pieces: [...changed].map((i) => {
         const [x, y] = this.moving.get(i) || [this.x[i], this.y[i]]
-        return { i, x, y, r: this.r[i], g: this.g[i], by: this.by[i], f: this.f[i] }
+        return { i, x, y, r: this.r[i], g: this.g[i], by: this.by[i] }
       }),
     })
     this.emitStats()
@@ -1569,21 +1494,6 @@ export class Engine {
     this.commit(changed)
   }
 
-  // Turns a loose face down piece face up. It never goes back, so clicking a piece to select it is
-  // safe. Pieces in a module are always face up, so they stay put.
-  flip(i) {
-    if (!this.f[i] || this.connected(i)) return
-    // A long piece turns over as one.
-    const cells = this.cellsOf(i)
-    const now = performance.now()
-    for (const k of cells) {
-      this.f[k] = 0
-      this.flips.set(k, now)
-    }
-    this.send({ type: 'moves', pieces: cells.map((k) => ({ i: k, x: this.x[k], y: this.y[k], r: this.r[k], g: this.g[k], f: this.f[k] })) })
-    this.invalidate()
-  }
-
   snap(ids) {
     const { cols, rows } = this.room
     const { w, h, S } = this.geo
@@ -1601,8 +1511,7 @@ export class Engine {
       return out
     }
     const gap = (p, q) => {
-      // Face down pieces never connect.
-      if (this.r[p] !== this.r[q] || this.f[p] || this.f[q]) return null
+      if (this.r[p] !== this.r[q]) return null
       const dc = (q % cols) - (p % cols)
       const dr = ((q / cols) | 0) - ((p / cols) | 0)
       const [ex, ey] = rot(dc * w, dr * h, this.r[p])
@@ -1677,7 +1586,7 @@ export class Engine {
 
   // ---- dev tools (npm run dev only, see DevMenu.jsx) -----------------------
 
-  // Puts pieces where they belong next to piece a, face up and turned like it. Returns where they
+  // Puts pieces where they belong next to piece a, turned like it. Returns where they
   // were, so they can ease over from there.
   devPlace(ids, a) {
     const { cols } = this.room
@@ -1689,8 +1598,6 @@ export class Engine {
       this.x[i] = this.x[a] + ex
       this.y[i] = this.y[a] + ey
       this.r[i] = this.r[a]
-      if (this.f[i]) this.flips.set(i, now)
-      this.f[i] = 0
       this.turns.delete(i)
     }
     return from
@@ -1752,7 +1659,7 @@ export class Engine {
   // credited for anything and the trays emptied.
   devRestart() {
     if (this.drag) return
-    const layout = (this.room.annoying ? pile : scatter)(this.room, (Math.random() * 2 ** 31) | 0)
+    const layout = scatter(this.room, (Math.random() * 2 ** 31) | 0)
     const now = performance.now()
     this.turns.clear()
     this.held.clear()
@@ -1762,8 +1669,6 @@ export class Engine {
       this.r[p.i] = p.r
       this.g[p.i] = p.g
       this.by[p.i] = null
-      if ((p.f ? 1 : 0) !== this.f[p.i]) this.flips.set(p.i, now)
-      this.f[p.i] = p.f ? 1 : 0
     }
     this.setSelection(new Set())
     const full = this.trays.filter((t) => t.pieces.length)
@@ -1832,10 +1737,6 @@ export class Engine {
       this.r[p.i] = p.r
       this.g[p.i] = p.g
       if (p.by !== undefined) this.by[p.i] = p.by
-      if (p.f !== undefined && p.f !== null && (p.f ? 1 : 0) !== this.f[p.i]) {
-        this.f[p.i] = p.f ? 1 : 0
-        this.flips.set(p.i, performance.now())
-      }
       touched.add(p.i)
     }
     if (touched.size) this.toTop(touched)
@@ -1850,7 +1751,7 @@ export class Engine {
   resync(pieces) {
     const list = pieces.filter(
       (p) =>
-        p.x !== this.x[p.i] || p.y !== this.y[p.i] || p.r !== this.r[p.i] || p.g !== this.g[p.i] || (p.f ? 1 : 0) !== this.f[p.i],
+        p.x !== this.x[p.i] || p.y !== this.y[p.i] || p.r !== this.r[p.i] || p.g !== this.g[p.i],
     )
     if (list.length) this.applyRemote(list)
   }
@@ -2203,7 +2104,7 @@ export class Engine {
     this.last = now
     let again = false
 
-    if (!this.spriteWorker && (this.built < this.n || this.backQueue.length)) {
+    if (!this.spriteWorker && this.built < this.n) {
       this.buildSome(now + 12)
       again = true
     }
@@ -2324,11 +2225,6 @@ export class Engine {
         }
         if (Math.abs(t.a) < 0.001) this.turns.delete(i)
       }
-      again = true
-    }
-
-    if (this.flips.size) {
-      for (const [i, t0] of this.flips) if (now - t0 >= FLIP_MS) this.flips.delete(i)
       again = true
     }
 
@@ -2482,25 +2378,21 @@ export class Engine {
   }
 
   // Adds piece i at (x, y), turned a and scaled s, to the frame's instances for view v, like a 2D
-  // drawImage with the transform (a b c d e f): mirrored when face down, squeezed mid flip. False
-  // while its sprite isn't on the GPU yet.
+  // drawImage with the transform (a b c d e f). False while its sprite isn't on the GPU yet.
   gpuPiece(i, x, y, a, s, v) {
-    if (!this.face(i) || (this.gn + 1) * PIECE_FLOATS > this.gi.length) return false
-    const fx = this.fsx
-    const cell = fx >= 0 ? i : this.backCells.get(i)
-    if (cell === undefined || !this.gpu.has[cell]) return false
-    const z = v.z * this.dpr * s * this.flift
+    if (!this.sprites[i] || !this.gpu.has[i] || (this.gn + 1) * PIECE_FLOATS > this.gi.length) return false
+    const z = v.z * this.dpr * s
     const c = Math.cos(a) * z
     const sn = Math.sin(a) * z
     const k = this.gn++ * PIECE_FLOATS
     const f = this.gi
-    f[k] = c * fx
-    f[k + 1] = sn * fx
+    f[k] = c
+    f[k + 1] = sn
     f[k + 2] = -sn
     f[k + 3] = c
     f[k + 4] = ((x - v.x) * v.z + v.w / 2) * this.dpr
     f[k + 5] = ((y - v.y) * v.z + v.h / 2) * this.dpr
-    this.giu[k + 6] = cell
+    this.giu[k + 6] = i
     return true
   }
 

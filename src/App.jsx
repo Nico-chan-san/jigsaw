@@ -2,7 +2,6 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import RoomsDialog from './pages/Rooms.jsx'
 import Room from './pages/Room.jsx'
 import Settings from './components/Settings.jsx'
-import { AccountButton } from './components/AccountDialog.jsx'
 import AccountPrompt from './components/Account.jsx'
 import { api } from './lib/api.js'
 import { useLinger } from './lib/linger.js'
@@ -260,7 +259,6 @@ export default function App() {
       ) : (
         <div className="room">
           <div className="float tr">
-            <AccountButton />
             <Settings />
           </div>
         </div>

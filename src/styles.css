@@ -134,9 +134,17 @@ button {
   top: 16px;
   right: 16px;
 }
-.float.br {
+/* The bottom right controls: zoom, and fullscreen, as separate groups. */
+.br {
+  position: absolute;
   bottom: 16px;
   right: 16px;
+  z-index: 5;
+  display: flex;
+  gap: 8px;
+}
+.br > .float {
+  position: static;
 }
 
 /* After a few seconds without the pointer or keyboard (see Room.jsx), the controls fade away. */
@@ -961,7 +969,7 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   font-weight: 500;
 }
 
-/* Hardcore and private as rows in one box. */
+/* The options as rows in one box. */
 .options {
   overflow: hidden;
   border: 1px solid var(--line);
@@ -1177,13 +1185,6 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   width: 16px;
   height: 16px;
   color: var(--muted);
-}
-.sep {
-  align-self: center;
-  width: 1px;
-  height: 20px;
-  margin: 0 4px;
-  background: var(--line);
 }
 /* In fullscreen on a MacBook with a notch, the top middle toolbar goes below it (see Room.jsx). */
 .room.notch .tc {
