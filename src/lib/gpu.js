@@ -283,6 +283,8 @@ class Gpu {
     }
     this.buffers = {}
     this.size = [0, 0]
+    // Masks, settings and bind groups for other players' outlines, made as they're needed.
+    this.xs = []
   }
 
   async init() {
@@ -428,6 +430,11 @@ class Gpu {
     if (this.size[0] === W && this.size[1] === H) return
     this.size = [W, H]
     for (const t of [this.mask, this.shA, this.shB]) t?.destroy()
+    for (const x of this.xs) {
+      x.tex.destroy()
+      x.buf.destroy()
+    }
+    this.xs = []
     const d = this.device
     const usage = GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
     this.mask = d.createTexture({ size: [W, H], format: 'rg8unorm', usage })
@@ -451,13 +458,32 @@ class Gpu {
     this.gHl = group(this.mask, this.post.hl)
   }
 
+  // The k-th extra outline's mask, settings and bind group.
+  extraMask(k) {
+    let x = this.xs[k]
+    if (!x) {
+      const d = this.device
+      const tex = d.createTexture({ size: this.size, format: 'rg8unorm', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING })
+      const buf = d.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+      const group = d.createBindGroup({
+        layout: this.lPost,
+        entries: [
+          { binding: 0, resource: tex.createView() },
+          { binding: 1, resource: { buffer: buf } },
+        ],
+      })
+      x = this.xs[k] = { tex, buf, group }
+    }
+    return x
+  }
+
   // Draws a frame. f: {
   //   W, H: the screen in device pixels; cam: [x, y, device pixels per world unit]; sprite: [w, h]
   //   in world units; bg, dot: colours [r, g, b, a]; dotStep (world units), dotSize (device pixels);
   //   trays, refs: { data, count }; pieces: { data, count }, with ranges [first, count] in seg:
   //   still and lift (drawn in that order), sel and hl (outlined); selBox, hlBox: the
   //   outlined pieces' box [x0, y0, x1, y1] in device pixels; selColor, hlColor; outline: [width,
-  //   cut]; selUnder: the selection outline goes under the lifted pieces; shadow:
+  //   cut]; extra: more outlines, [{ range: [first, count], box, color }]; selUnder: the selection outline goes under the lifted pieces; shadow:
   //   { color, blur, ox, oy } in device pixels, or null }
   frame(f) {
     const d = this.device
@@ -506,6 +532,21 @@ class Gpu {
       if (sel) post(this.post.sel, f.selColor, [1, 0, 0, 0])
       if (hl) post(this.post.hl, f.hlColor, [0, 1, 0, 0])
     }
+
+    // Other players' outlines, each with a mask of its own, drawn in red like the selection's.
+    const extras = (f.extra || []).filter((e) => e.range[1] > 0)
+    const masks = extras.map((e, k) => {
+      const x = this.extraMask(k)
+      const pass = enc.beginRenderPass({ colorAttachments: [{ view: x.tex.createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }] })
+      pass.setPipeline(this.pipes.maskR)
+      pass.setBindGroup(0, this.g0)
+      pass.setBindGroup(1, this.gAtlas)
+      pass.setVertexBuffer(0, pieces)
+      draw(pass, e.range)
+      pass.end()
+      d.queue.writeBuffer(x.buf, 0, new Float32Array([...premul(e.color), 1, 0, 0, 0, f.outline[0], f.outline[1], 0, 0]))
+      return x
+    })
 
     // The lifted pieces' silhouettes at a third of the resolution, blurred one way, then the other.
     const sh = f.shadow && seg.lift[1] > 0 ? f.shadow : null
@@ -578,6 +619,7 @@ class Gpu {
     piecesOf(seg.still)
     if (sel && f.selUnder) outline(this.gSel, f.selBox)
     if (hl) outline(this.gHl, f.hlBox)
+    extras.forEach((e, k) => outline(masks[k].group, e.box))
     if (sh) {
       pass.setPipeline(this.pipes.shadow)
       pass.setBindGroup(1, this.gShadow)

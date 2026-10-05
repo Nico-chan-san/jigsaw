@@ -3,6 +3,8 @@
 ## 5 October 2026
 
 - In the new jigsaw form the image preview now spans the whole window, with the settings under it. It adjusts when you resize the window.
+- When someone turns pieces, you now see them spin into place too. Pieces other players carry also lift up with a shadow, like yours do.
+- You can now see what other players have selected or are pointing at. Pieces, images, trays and notes get an outline in the same color as that player's cursor, and so do the pieces they are carrying. The box they drag out to select is shown too.
 - **Classic** pieces now look more like a real jigsaw: gently crooked rows of pieces, and smooth round tabs that are each a little different in place, size and tilt. Jigsaws you've already started get the new pieces too; everything still fits together.
 
 ## 4 October 2026

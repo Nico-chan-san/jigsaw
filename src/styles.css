@@ -1334,6 +1334,10 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   outline: calc(var(--u) * 0.04) solid var(--sel);
   outline-offset: calc(var(--u) * 0.02);
 }
+.note.marked {
+  outline: calc(var(--u) * 0.04) solid var(--mark);
+  outline-offset: calc(var(--u) * 0.02);
+}
 .note textarea {
   height: calc(var(--u) * 2.2);
   padding: calc(var(--u) * 0.06);

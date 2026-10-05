@@ -35,7 +35,7 @@ function fitText(el, unit) {
   if (!fits(lo)) el.style.overflowWrap = 'anywhere'
 }
 
-function Note({ note, engine, focus, selected, canEdit, author, ensureName, onChange, onSave, onLive }) {
+function Note({ note, engine, focus, selected, mark, canEdit, author, ensureName, onChange, onSave, onLive }) {
   const area = useRef(null)
   const saveTimer = useRef(0)
 
@@ -104,8 +104,8 @@ function Note({ note, engine, focus, selected, canEdit, author, ensureName, onCh
 
   return (
     <div
-      className={`note${selected ? ' sel' : ''}`}
-      style={{ left: note.x, top: note.y }}
+      className={`note${selected ? ' sel' : mark ? ' marked' : ''}`}
+      style={{ left: note.x, top: note.y, '--mark': mark }}
       data-note={note.id}
       onPointerMove={(e) => {
         if (e.buttons) return engine.showTip(null)
@@ -137,6 +137,7 @@ export function NotesLayer({ engine, roomId, me, nameOf, initial, busRef, create
   const [notes, setNotes] = useState(initial)
   const [focusId, setFocusId] = useState(null)
   const [selected, setSelected] = useState(() => new Set())
+  const [marked, setMarked] = useState(() => new Map())
   const layer = useRef(null)
   const lastClick = useRef({})
   const latest = useRef(notes)
@@ -182,6 +183,8 @@ export function NotesLayer({ engine, roomId, me, nameOf, initial, busRef, create
         }
       },
       select: (ids) => setSelected(new Set(ids)),
+      // Notes other players have selected, id -> their colour.
+      mark: (colors) => setMarked(colors),
       remove: (ids) => {
         const gone = new Set(ids)
         setNotes((ns) => ns.filter((n) => !gone.has(n.id)))
@@ -269,6 +272,7 @@ export function NotesLayer({ engine, roomId, me, nameOf, initial, busRef, create
           engine={engine}
           focus={focusId === n.id}
           selected={selected.has(n.id)}
+          mark={marked.get(n.id)}
           canEdit={!!me}
           author={nameOf(n.author)}
           ensureName={ensureName}

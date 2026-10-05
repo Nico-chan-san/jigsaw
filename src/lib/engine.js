@@ -42,6 +42,9 @@ const HANDLE = 7
 // Cursor updates are throttled to this interval (ms); idle cursors vanish after CURSOR_IDLE.
 const CURSOR_MS = 50
 const CURSOR_IDLE = 20000
+// Our selection and hover go out at most this often (ms); the most outlines drawn for other players.
+const MARKS_MS = 100
+const MAX_OUTLINES = 8
 // Canvases are never drawn finer than this many pixels per CSS pixel.
 const MAX_DPR = 2
 const makeCanvas = (w, h) => {
@@ -166,6 +169,12 @@ export class Engine {
     // Other players' pointers: client -> { x, y, tx, ty, name, color, t }.
     this.cursors = new Map()
     this.lastCursor = 0
+    // What other players have selected or hover over: client -> { sel, hl } (piece ids), outlined in
+    // their cursor colour. Ours go out the same way, throttled, see sendMarks().
+    this.marks = new Map()
+    this.lastMarks = 0
+    // Pieces other players carry are lifted with a shadow like ours: client -> { ids, set, value, target }.
+    this.rlift = new Map()
     for (const p of pieces) {
       this.x[p.i] = p.x
       this.y[p.i] = p.y
@@ -587,10 +596,11 @@ export class Engine {
   // this.qa (the angle). Kept in fields so drawing thousands of pieces allocates nothing.
   poseInto(i) {
     const t = this.turns.size ? this.turns.get(i) : undefined
-    if (!t) {
+    // A self turn only eases the piece's angle, around wherever it is (pieces carried by others).
+    if (!t || t.self) {
       this.qx = this.x[i]
       this.qy = this.y[i]
-      this.qa = this.r[i] * Q
+      this.qa = this.r[i] * Q + (t ? t.a : 0)
       return
     }
     const dx = this.x[i] - t.cx
@@ -608,6 +618,7 @@ export class Engine {
     this.selRefs = refs
     if (!same(notes, this.selNotes)) this.notes?.select(notes)
     this.selNotes = notes
+    this.sendMarks()
     this.invalidate()
   }
 
@@ -995,6 +1006,7 @@ export class Engine {
     }
     if (this.marquee && e.pointerId === this.marquee.pointer) {
       this.marquee = null
+      this.sendCursor(true)
       this.invalidate()
     }
     if (this.refDrag && e.pointerId === this.refDrag.pointer) {
@@ -1132,6 +1144,7 @@ export class Engine {
   setHighlight(hl) {
     if (hl?.key === this.hl?.key) return
     this.hl = hl
+    this.sendMarks()
     this.invalidate()
   }
 
@@ -1343,6 +1356,7 @@ export class Engine {
     if (!ids.length) return
     this.settle(ids)
     const mods = this.modules(ids)
+    const turned = []
     for (const m of whole ? [ids] : mods) {
       const b = this.bbox(m, 0)
       const cx = (b.x0 + b.x1) / 2
@@ -1355,10 +1369,11 @@ export class Engine {
         this.r[i] = mod4(this.r[i] + dir)
         this.turns.set(i, t)
       }
+      turned.push({ ids: m, cx: r2(cx), cy: r2(cy), d: dir })
     }
     const changed = this.snapModules(mods)
     this.fitTraysOf(ids)
-    this.commit(changed)
+    this.commit(changed, turned)
   }
 
   // Lays the selected modules out in a square grid, centred where the selection lies now.
@@ -1398,10 +1413,12 @@ export class Engine {
   }
 
   // Tells everyone where these pieces ended up (after a drop, turn or sort) and updates the rest.
-  commit(changed) {
-    if (this.sel.size) this.sel = this.withGroups(this.sel)
+  // turns: the spins around a point that got them there ({ ids, cx, cy, d }), so others can show them.
+  commit(changed, turns) {
+    this.growSelection()
     this.send({
       type: 'moves',
+      turns,
       pieces: [...changed].map((i) => {
         const [x, y] = this.moving.get(i) || [this.x[i], this.y[i]]
         return { i, x, y, r: this.r[i], g: this.g[i], by: this.by[i] }
@@ -1430,6 +1447,44 @@ export class Engine {
     })
   }
 
+  // The colour each image, tray or note is outlined in because another player has it selected.
+  markedBy(key) {
+    const out = new Map()
+    for (const [c, m] of this.marks) {
+      const color = cursorColor(c)
+      const ids = key === 'tray' ? [m.tray] : m[key]
+      for (const id of ids) if (id && !out.has(id)) out.set(id, color)
+    }
+    return out
+  }
+
+  markNotes() {
+    this.notes?.mark(this.markedBy('notes'))
+  }
+
+  // Pulls whole groups into the selection after pieces joined, telling others if it grew.
+  growSelection() {
+    if (!this.sel.size) return
+    const n = this.sel.size
+    this.sel = this.withGroups(this.sel)
+    if (this.sel.size !== n) this.sendMarks()
+  }
+
+  // Tells the others what we have selected and hover over, so they can outline it in our colour.
+  sendMarks(force) {
+    const now = performance.now()
+    clearTimeout(this.marksTimer)
+    if (force || now - this.lastMarks >= MARKS_MS) {
+      this.lastMarks = now
+      const hl = this.hl && !this.drag ? this.hl.ids : []
+      const refs = new Set(this.selRefs)
+      if (this.refSel) refs.add(this.refSel)
+      this.send({ type: 'marks', sel: [...this.sel], hl, refs: [...refs], notes: [...this.selNotes], tray: this.traySel })
+    } else {
+      this.marksTimer = setTimeout(() => this.sendMarks(true), MARKS_MS - (now - this.lastMarks))
+    }
+  }
+
   sendCursor(force) {
     const now = performance.now()
     clearTimeout(this.cursorTimer)
@@ -1437,7 +1492,10 @@ export class Engine {
     if (force || now - this.lastCursor >= CURSOR_MS) {
       this.lastCursor = now
       const [x, y] = this.toWorld(...this.pointerAt)
-      this.send({ type: 'cursor', x: r2(x), y: r2(y), name: this.userName || '' })
+      // While dragging out a selection box, its corners go along (in world units).
+      const m = this.marquee
+      const box = m && Math.abs(m.sx - m.sx0) + Math.abs(m.sy - m.sy0) > 2 ? [...this.toWorld(m.sx0, m.sy0), ...this.toWorld(m.sx, m.sy)].map(r2) : undefined
+      this.send({ type: 'cursor', x: r2(x), y: r2(y), name: this.userName || '', box })
     } else {
       this.cursorTimer = setTimeout(() => this.sendCursor(true), CURSOR_MS - (now - this.lastCursor))
     }
@@ -1686,7 +1744,17 @@ export class Engine {
       const n = msg.ids?.length
       if (!n || msg.ox?.length !== n || msg.oy?.length !== n || msg.r0?.length !== n) return
       const d = { ids: msg.ids, ox: msg.ox, oy: msg.oy, r0: msg.r0 }
+      // A fresh grab for the pieces they already hold means they turned some: ease each one round.
+      const prev = this.remote.get(msg.client)
+      if (prev && prev.ids.length === n && prev.ids.every((id, j) => id === msg.ids[j])) {
+        d.k = prev.k
+        for (let j = 0; j < n; j++) {
+          const dr = mod4(msg.r0[j] - prev.r0[j])
+          if (dr) this.turns.set(msg.ids[j], { self: true, a: (this.turns.get(msg.ids[j])?.a || 0) - (dr === 3 ? -1 : dr) * Q })
+        }
+      }
       this.remote.set(msg.client, d)
+      this.rlift.set(msg.client, { ids: d.ids, set: new Set(d.ids), value: this.rlift.get(msg.client)?.value || 0, target: 1 })
       this.toTop(new Set(d.ids))
       this.remoteLive(d, msg.px, msg.py, msg.k | 0, now)
     } else if (msg.type === 'live') {
@@ -1694,21 +1762,35 @@ export class Engine {
       if (d) this.remoteLive(d, msg.px, msg.py, msg.k | 0, now)
     } else if (msg.type === 'moves') {
       this.remote.delete(msg.client)
-      this.applyRemote(msg.pieces)
+      const rl = this.rlift.get(msg.client)
+      if (rl) rl.target = 0
+      this.applyRemote(msg.pieces, msg.turns)
+    } else if (msg.type === 'marks') {
+      const ok = (a) => (Array.isArray(a) ? a.filter((i) => Number.isInteger(i) && i >= 0 && i < this.n) : [])
+      const names = (a) => (Array.isArray(a) ? a.filter((x) => typeof x === 'string').slice(0, 500) : [])
+      const m = { sel: ok(msg.sel), hl: ok(msg.hl), refs: names(msg.refs), notes: names(msg.notes), tray: typeof msg.tray === 'string' ? msg.tray : null }
+      if (m.sel.length || m.hl.length || m.refs.length || m.notes.length || m.tray) this.marks.set(msg.client, m)
+      else this.marks.delete(msg.client)
+      this.markNotes()
+      this.invalidate()
     } else if (msg.type === 'cursor') {
       if (msg.hide) this.cursors.delete(msg.client)
       else if (isFinite(msg.x) && isFinite(msg.y)) {
         const c = this.cursors.get(msg.client)
         const name = String(msg.name || '').slice(0, 32) || 'Guest'
-        if (c) Object.assign(c, { tx: msg.x, ty: msg.y, name, t: now })
+        const box = Array.isArray(msg.box) && msg.box.length === 4 && msg.box.every(isFinite) ? msg.box : null
+        if (c) Object.assign(c, { tx: msg.x, ty: msg.y, name, t: now, box })
         else {
           const color = cursorColor(msg.client)
-          this.cursors.set(msg.client, { x: msg.x, y: msg.y, tx: msg.x, ty: msg.y, name, color, t: now })
+          this.cursors.set(msg.client, { x: msg.x, y: msg.y, tx: msg.x, ty: msg.y, name, color, t: now, box })
         }
       }
       this.invalidate()
     } else if (msg.type === 'gone') {
       this.cursors.delete(msg.client)
+      this.marks.delete(msg.client)
+      this.rlift.delete(msg.client)
+      this.markNotes()
       const d = this.remote.get(msg.client)
       if (d) for (const i of d.ids) this.held.delete(i)
       this.remote.delete(msg.client)
@@ -1723,11 +1805,14 @@ export class Engine {
       this.held.set(i, now + 2500)
       this.moving.set(i, [px + ox, py + oy])
       this.r[i] = mod4(d.r0[j] + k)
+      // They turned the pieces they hold: ease each one's angle round.
+      if (d.k !== undefined && k !== d.k) this.turns.set(i, { self: true, a: (this.turns.get(i)?.a || 0) - (k - d.k) * Q })
     }
+    d.k = k
     this.invalidate()
   }
 
-  applyRemote(list) {
+  applyRemote(list, turns) {
     const g0 = this.g.slice()
     const touched = new Set()
     for (const p of list) {
@@ -1739,8 +1824,22 @@ export class Engine {
       if (p.by !== undefined) this.by[p.i] = p.by
       touched.add(p.i)
     }
+    // Pieces someone turned spin into place from where they lay, as they do on that player's screen.
+    for (const t of Array.isArray(turns) ? turns : []) {
+      if (!Array.isArray(t?.ids) || !isFinite(t.cx) || !isFinite(t.cy) || (t.d !== 1 && t.d !== -1)) continue
+      const turn = { cx: t.cx, cy: t.cy, a: (this.turns.get(t.ids[0])?.a || 0) - t.d * Q }
+      for (const i of t.ids) {
+        if (!touched.has(i)) continue
+        const to = this.moving.get(i)
+        if (to) {
+          ;[this.x[i], this.y[i]] = to
+          this.moving.delete(i)
+        }
+        this.turns.set(i, turn)
+      }
+    }
     if (touched.size) this.toTop(touched)
-    if (this.sel.size) this.sel = this.withGroups(this.sel)
+    this.growSelection()
     this.joined(g0, touched, false)
     this.emitStats()
     this.checkComplete()
@@ -1829,6 +1928,7 @@ export class Engine {
   selectRef(id) {
     if (this.refSel === id) return
     this.refSel = id
+    this.sendMarks()
     this.invalidate()
   }
 
@@ -1953,6 +2053,7 @@ export class Engine {
   selectTray(id) {
     if (this.traySel === id) return
     this.traySel = id
+    this.sendMarks()
     this.invalidate()
   }
 
@@ -2195,6 +2296,14 @@ export class Engine {
       } else again = true
     }
 
+    for (const [id, rl] of this.rlift) {
+      rl.value += (rl.target - rl.value) * ease(dt, rl.target ? 55 : 70)
+      if (Math.abs(rl.target - rl.value) < 0.005) {
+        rl.value = rl.target
+        if (!rl.target) this.rlift.delete(id)
+      } else again = true
+    }
+
     for (const [id, c] of this.cursors) {
       if (now - c.t > CURSOR_IDLE) {
         this.cursors.delete(id)
@@ -2290,14 +2399,17 @@ export class Engine {
 
     this.gTrays = grow(this.gTrays, this.trays.length * TRAY_FLOATS)
     let trays = 0
+    const markedTrays = this.markedBy('tray')
+    const markedRefs = this.markedBy('refs')
     const radius = Math.min(this.geo.S * 0.25, 10 / v.z) * z
     for (const t of this.trays) {
       if (t.x + t.w < wx0 || t.x > wx1 || t.y + t.h < wy0 || t.y > wy1) continue
       const color = rgba(TRAY_COLORS[t.color] || TRAY_COLORS.gray)
       const on = t.id === this.traySel
+      const mark = !on && markedTrays.get(t.id)
       const rect = [sx(t.x), sy(t.y), sx(t.x + t.w), sy(t.y + t.h)]
       const r = Math.min(radius, (rect[2] - rect[0]) / 2, (rect[3] - rect[1]) / 2)
-      this.gTrays.set([...rect, ...pm(color, 0.16), ...pm(on ? rgba(this.colors.sel) : color, on ? 1 : 0.7), r, (on ? 2.5 : 1.25) * dpr, 0, 0], trays++ * TRAY_FLOATS)
+      this.gTrays.set([...rect, ...pm(color, 0.16), ...pm(on ? rgba(this.colors.sel) : mark ? rgba(mark) : color, on || mark ? 1 : 0.7), r, (on || mark ? 2.5 : 1.25) * dpr, 0, 0], trays++ * TRAY_FLOATS)
     }
 
     this.gRefs = grow(this.gRefs, this.refs.length * REF_FLOATS)
@@ -2306,16 +2418,18 @@ export class Engine {
       const [w, h] = this.refSize(ref)
       if (ref.x + w / 2 < wx0 || ref.x - w / 2 > wx1 || ref.y + h / 2 < wy0 || ref.y - h / 2 > wy1) continue
       const on = this.selRefs.has(ref.id)
+      const mark = !on && markedRefs.get(ref.id)
       const rect = [sx(ref.x - w / 2), sy(ref.y - h / 2), sx(ref.x + w / 2), sy(ref.y + h / 2)]
-      this.gRefs.set([...rect, ...pm(rgba(on ? this.colors.sel : this.colors.dot)), (on ? 3 : 1) * dpr, 0, 0, 0], refs++ * REF_FLOATS)
+      this.gRefs.set([...rect, ...pm(rgba(on ? this.colors.sel : mark || this.colors.dot)), (on || mark ? 3 : 1) * dpr, 0, 0, 0], refs++ * REF_FLOATS)
     }
 
     const R = this.radius
     const seen = (x, y, e) => x + e >= wx0 && x - e <= wx1 && y + e >= wy0 && y - e <= wy1
     this.gn = 0
     const lifted = this.lift?.set
+    const rlifted = this.rlift.size ? new Set([...this.rlift.values()].flatMap((rl) => rl.ids)) : null
     for (const i of this.order) {
-      if (lifted?.has(i)) continue
+      if (lifted?.has(i) || rlifted?.has(i)) continue
       this.poseInto(i)
       if (seen(this.qx, this.qy, R)) this.gpuPiece(i, this.qx, this.qy, this.qa, 1, v)
     }
@@ -2325,8 +2439,19 @@ export class Engine {
       this.liftPoses((i, x, y, a, s) => {
         if (seen(x, y, R * s)) this.gpuPiece(i, x, y, a, s, v)
       })
-      lift[1] = this.gn - lift[0]
     }
+    // Pieces other players carry, grown a little as ours are.
+    let rvalue = 0
+    for (const rl of this.rlift.values()) {
+      const s = 1 + 0.045 * rl.value
+      rvalue = Math.max(rvalue, rl.value)
+      for (const i of rl.ids) {
+        if (lifted?.has(i)) continue
+        this.poseInto(i)
+        if (seen(this.qx, this.qy, R * s)) this.gpuPiece(i, this.qx, this.qy, this.qa, s, v)
+      }
+    }
+    lift[1] = this.gn - lift[0]
     // The outlined pieces as they lie, and the box around them on the screen.
     const outlined = (ids, box) => {
       const first = this.gn
@@ -2349,11 +2474,22 @@ export class Engine {
     const sel = this.sel.size ? outlined(carried ? [...this.sel].filter((i) => !carried.has(i)) : this.sel, selBox) : [0, 0]
     const hlBox = [Infinity, Infinity, -Infinity, -Infinity]
     const hl = this.hl && !this.drag ? outlined(this.hl.ids, hlBox) : [0, 0]
+    // What other players hold, select or hover over, each in their cursor colour.
+    const extra = []
+    for (const c of new Set([...this.marks.keys(), ...this.remote.keys()])) {
+      if (extra.length >= MAX_OUTLINES) break
+      const m = this.marks.get(c)
+      const ids = new Set([...(m?.sel || []), ...(m?.hl || []), ...(this.remote.get(c)?.ids || [])])
+      if (!ids.size) continue
+      const box = [Infinity, Infinity, -Infinity, -Infinity]
+      extra.push({ range: outlined(ids, box), box, color: rgba(cursorColor(c)) })
+    }
 
     let sp = this.geo.S
     while (sp * v.z < 22) sp *= 2
     while (sp * v.z > 44) sp /= 2
-    const l = this.lift
+    const lv = Math.max(this.lift?.value || 0, rvalue)
+    const l = this.lift || rvalue > 0 ? { value: lv } : null
     this.gpu.frame({
       W: this.gpuEl.width,
       H: this.gpuEl.height,
@@ -2369,6 +2505,7 @@ export class Engine {
       seg: { still, lift, sel, hl },
       selBox,
       hlBox,
+      extra,
       selColor: rgba(this.colors.sel),
       hlColor: rgba(this.colors.line || '#000'),
       outline: [2.5 * dpr, 0.75 * dpr],
@@ -2526,6 +2663,22 @@ export class Engine {
     ctx.font = '600 11px system-ui, -apple-system, sans-serif'
     ctx.textBaseline = 'middle'
     ctx.lineJoin = 'round'
+    // Selection boxes other players are dragging out, in their colours.
+    for (const c of this.cursors.values()) {
+      if (!c.box) continue
+      const [ax, ay, bx, by] = c.box
+      const x = (Math.min(ax, bx) - cam.x) * cam.z + vw / 2
+      const y = (Math.min(ay, by) - cam.y) * cam.z + vh / 2
+      const w = Math.abs(bx - ax) * cam.z
+      const h = Math.abs(by - ay) * cam.z
+      ctx.globalAlpha = 0.1
+      ctx.fillStyle = c.color
+      ctx.fillRect(x, y, w, h)
+      ctx.globalAlpha = 1
+      ctx.lineWidth = 1
+      ctx.strokeStyle = c.color
+      ctx.strokeRect(x + 0.5, y + 0.5, w, h)
+    }
     for (const c of this.cursors.values()) {
       const x = (c.x - cam.x) * cam.z + vw / 2
       const y = (c.y - cam.y) * cam.z + vh / 2

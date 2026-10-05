@@ -453,8 +453,8 @@ function createApi(dbFile) {
         if (before?.id !== p?.id) presence(roomId, before)
       } else if (m.type === 'moves' && Array.isArray(m.pieces)) {
         saveMoves(roomId, m.pieces)
-        broadcast(roomId, { type: 'moves', client, pieces: m.pieces }, ws)
-      } else if (m.type === 'grab' || m.type === 'live' || m.type === 'cursor') {
+        broadcast(roomId, { type: 'moves', client, pieces: m.pieces, turns: Array.isArray(m.turns) ? m.turns.slice(0, 2000) : undefined }, ws)
+      } else if (m.type === 'grab' || m.type === 'live' || m.type === 'cursor' || m.type === 'marks') {
         broadcast(roomId, { ...m, client }, ws)
       } else if (m.type === 'react' && isFinite(m.x) && isFinite(m.y)) {
         broadcast(roomId, { type: 'react', client, kind: String(m.kind || '').slice(0, 16), x: +m.x, y: +m.y }, ws)
