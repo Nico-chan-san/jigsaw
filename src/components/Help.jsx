@@ -62,6 +62,7 @@ const SECTIONS = [
       [<Key key="p">P</Key>, 'Players'],
       [<Key key="n">N</Key>, 'New note'],
       [<Key key="t">T</Key>, 'New tray, to sort pieces into (around the selected pieces, if any)'],
+      [<Key key="tn">1 to 9</Key>, 'Move selected pieces to the tray with that number'],
       [<Key key="i">I</Key>, 'New image'],
       [<Key key="r">R</Key>, 'Reactions'],
       [<Key key="sh">Shift</Key>, 'Add to selection'],

@@ -1090,6 +1090,12 @@ export class Engine {
       if (e.repeat) return
       return key === ' ' ? this.spin(1, e.shiftKey) : this.gather(e.shiftKey)
     }
+    // A number with pieces selected sends them to the tray with that number.
+    if (/^[1-9]$/.test(key) && this.sel.size) {
+      e.preventDefault()
+      if (!e.repeat) this.sendToTray(+key)
+      return
+    }
     // With a selection on the table (or a tray selected), space turns the pieces where they lie
     // (shift: all as one) and G sorts them into a grid (shift: in random order).
     if ((key === ' ' || key === 'g') && (this.sel.size || this.traySel)) {
@@ -2021,6 +2027,10 @@ export class Engine {
     const free = keys.filter((k) => !used.has(k))
     const pick = free.length ? free : keys
     const color = pick[Math.floor(Math.random() * pick.length)]
+    // The lowest of 1 to 9 no tray has; none once all are taken.
+    const taken = new Set(this.trays.map((t) => t.num))
+    let num = 0
+    for (let n = 1; n <= 9 && !num; n++) if (!taken.has(n)) num = n
     const tray = {
       id: Math.random().toString(36).slice(2, 10),
       x: x - w / 2,
@@ -2028,6 +2038,7 @@ export class Engine {
       w,
       h,
       color,
+      num,
       pieces: [],
       author: this.user || '',
     }
@@ -2154,6 +2165,57 @@ export class Engine {
     }
     if (into) into.pieces = [...new Set([...into.pieces, ...moved])]
     this.refitTrays(touched)
+  }
+
+  // A number key with pieces selected: lays them out in a grid in the tray with that number, next to
+  // whatever is in it already, and takes them out of any other tray.
+  sendToTray(num) {
+    const t = this.trays.find((x) => x.num === num)
+    if (!t) return
+    if (this.guard && !this.guard()) return
+    const ids = this.freeSelection()
+    if (!ids.length) return
+    this.settle(ids)
+    const mods = this.modules(ids)
+    const boxes = mods.map((m) => this.bbox(m, this.packExtent))
+    const spots = pack(boxes, this.geo.S)
+    let gx0 = Infinity
+    let gx1 = -Infinity
+    boxes.forEach((b, k) => {
+      gx0 = Math.min(gx0, spots[k][0] - (b.x1 - b.x0) / 2)
+      gx1 = Math.max(gx1, spots[k][0] + (b.x1 - b.x0) / 2)
+    })
+    const moved = this.withGroups(ids)
+    const rest = t.pieces.filter((i) => !moved.has(i))
+    let cx = t.x + t.w / 2
+    let cy = t.y + t.h / 2
+    let left = cx - (gx0 + gx1) / 2
+    if (rest.length) {
+      const b = this.bbox(rest, this.packExtent)
+      left = b.x1 - gx0
+      cy = (b.y0 + b.y1) / 2
+    }
+    const x0 = this.x.slice()
+    const y0 = this.y.slice()
+    mods.forEach((m, k) => {
+      const b = boxes[k]
+      const dx = left + spots[k][0] - (b.x0 + b.x1) / 2
+      const dy = cy + spots[k][1] - (b.y0 + b.y1) / 2
+      for (const i of m) {
+        this.x[i] += dx
+        this.y[i] += dy
+      }
+    })
+    const changed = this.snapModules(mods)
+    // Ease everything from where it was, not just what the snap moved.
+    for (const i of ids) {
+      if (!this.moving.has(i)) this.moving.set(i, [this.x[i], this.y[i]])
+      this.x[i] = x0[i]
+      this.y[i] = y0[i]
+    }
+    this.toTop(new Set(ids))
+    this.placeInTrays(ids, 0, 0, t)
+    this.commit(changed)
   }
 
   // After pieces were turned or sorted: the trays they're in fit themselves around them again.
@@ -2567,7 +2629,26 @@ export class Engine {
 
   // Screen-space overlays: the selection box and the selected reference image's handles.
   drawChrome() {
-    const { ctx, dpr } = this
+    const { ctx, dpr, cam, vw, vh } = this
+    // Tray numbers, in a tag in the tray's colour at its top left corner.
+    for (const t of this.trays) {
+      if (!t.num) continue
+      const x = (t.x - cam.x) * cam.z + vw / 2
+      const y = (t.y - cam.y) * cam.z + vh / 2
+      if (x > vw || y > vh || x + t.w * cam.z < 0 || y + t.h * cam.z < 0) continue
+      this.dirty = true
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      ctx.beginPath()
+      ctx.roundRect(x + 6, y + 6, 20, 20, 6)
+      ctx.fillStyle = TRAY_COLORS[t.color] || TRAY_COLORS.gray
+      ctx.fill()
+      ctx.fillStyle = '#fff'
+      ctx.font = '700 12px system-ui, -apple-system, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(String(t.num), x + 16, y + 16.5)
+      ctx.textAlign = 'start'
+    }
     const sel = this.refSel && this.refs.find((r) => r.id === this.refSel)
     if (sel) {
       this.dirty = true

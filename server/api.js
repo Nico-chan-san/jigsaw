@@ -214,14 +214,14 @@ function createApi(dbFile) {
     deleteRef: db.prepare('DELETE FROM refs WHERE room_id = ? AND id = ?'),
     deleteRefs: db.prepare('DELETE FROM refs WHERE room_id = ?'),
     trays: db.prepare(
-      'SELECT id, x, y, w, h, name, color, pieces, author, created FROM trays WHERE room_id = ? ORDER BY created',
+      'SELECT id, x, y, w, h, name, color, num, pieces, author, created FROM trays WHERE room_id = ? ORDER BY created',
     ),
     upsertTray: db.prepare(`
-      INSERT INTO trays (id, room_id, x, y, w, h, name, color, pieces, author, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO trays (id, room_id, x, y, w, h, name, color, num, pieces, author, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (room_id, id) DO UPDATE SET
         x = excluded.x, y = excluded.y, w = excluded.w, h = excluded.h, name = excluded.name, color = excluded.color,
-        pieces = excluded.pieces`),
-    tray: db.prepare('SELECT id, x, y, w, h, name, color, pieces, author, created FROM trays WHERE room_id = ? AND id = ?'),
+        num = excluded.num, pieces = excluded.pieces`),
+    tray: db.prepare('SELECT id, x, y, w, h, name, color, num, pieces, author, created FROM trays WHERE room_id = ? AND id = ?'),
     deleteTray: db.prepare('DELETE FROM trays WHERE room_id = ? AND id = ?'),
     deleteTrays: db.prepare('DELETE FROM trays WHERE room_id = ?'),
     player: db.prepare('SELECT id, name FROM players WHERE id = ?'),
@@ -390,6 +390,7 @@ function createApi(dbFile) {
     h: Math.max(1, +b?.h || 0),
     name: String(b?.name || '').slice(0, 40),
     color: String(b?.color || '').slice(0, 16),
+    num: Math.min(9, Math.max(0, Math.trunc(+b?.num) || 0)),
     // Left out of live updates (while dragging), which don't change what's in the tray.
     pieces: Array.isArray(b?.pieces) ? b.pieces.filter((i) => Number.isInteger(i) && i >= 0).slice(0, 20000) : undefined,
     author: String(b?.author || '').slice(0, 32),
@@ -421,7 +422,7 @@ function createApi(dbFile) {
     if (live) return { ...t, created: +b.created || 0 }
     t.author = playerId(t.author) || ''
     const pieces = JSON.stringify(t.pieces || trayOut(q.tray.get(roomId, t.id))?.pieces || [])
-    q.upsertTray.run(t.id, roomId, t.x, t.y, t.w, t.h, t.name, t.color, pieces, t.author, Date.now())
+    q.upsertTray.run(t.id, roomId, t.x, t.y, t.w, t.h, t.name, t.color, t.num, pieces, t.author, Date.now())
     return trayOut(q.tray.get(roomId, t.id))
   }
 

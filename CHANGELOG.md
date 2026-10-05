@@ -2,6 +2,7 @@
 
 ## 5 October 2026
 
+- The first nine trays get a number, 1 to 9, shown in the top left corner. When a tray is removed, its number goes to the next new tray. Select some pieces and press the number to move them into that tray.
 - In the new jigsaw form the image preview now spans the whole window, with the settings under it. It adjusts when you resize the window.
 - When someone turns pieces, you now see them spin into place too. Pieces other players carry also lift up with a shadow, like yours do.
 - You can now see what other players have selected or are pointing at. Pieces, images, trays and notes get an outline in the same color as that player's cursor, and so do the pieces they are carrying. The box they drag out to select is shown too.
