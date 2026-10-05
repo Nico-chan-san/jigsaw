@@ -2630,27 +2630,22 @@ export class Engine {
   // Screen-space overlays: the selection box and the selected reference image's handles.
   drawChrome() {
     const { ctx, dpr, cam, vw, vh } = this
-    // Tray numbers, in a box at the tray's top left corner. Box and number are black or white,
-    // whichever shows on the tray: its colour tints the table at 16%.
+    // Tray numbers, in a tag in the tray's colour at its top left corner. It scales with the zoom
+    // like everything on the table, but never gets too small to read.
     const tag = Math.max(14, this.geo.S * 0.4 * cam.z)
     const gap = tag * 0.3
-    const table = rgba(this.colors.bg)
     for (const t of this.trays) {
       if (!t.num) continue
       const x = (t.x - cam.x) * cam.z + vw / 2
       const y = (t.y - cam.y) * cam.z + vh / 2
       if (x > vw || y > vh || x + t.w * cam.z < 0 || y + t.h * cam.z < 0) continue
-      const tint = rgba(TRAY_COLORS[t.color] || TRAY_COLORS.gray)
-      const [r, g, b] = [0, 1, 2].map((k) => table[k] * 0.84 + tint[k] * 0.16)
-      const ink = 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5 ? '#000' : '#fff'
       this.dirty = true
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.beginPath()
       ctx.roundRect(x + gap, y + gap, tag, tag, tag * 0.3)
-      ctx.lineWidth = Math.max(1.5, tag * 0.08)
-      ctx.strokeStyle = ink
-      ctx.stroke()
-      ctx.fillStyle = ink
+      ctx.fillStyle = TRAY_COLORS[t.color] || TRAY_COLORS.gray
+      ctx.fill()
+      ctx.fillStyle = '#fff'
       ctx.font = `700 ${Math.round(tag * 0.6)}px system-ui, -apple-system, sans-serif`
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
