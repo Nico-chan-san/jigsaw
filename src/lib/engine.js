@@ -2630,7 +2630,10 @@ export class Engine {
   // Screen-space overlays: the selection box and the selected reference image's handles.
   drawChrome() {
     const { ctx, dpr, cam, vw, vh } = this
-    // Tray numbers, in a tag in the tray's colour at its top left corner.
+    // Tray numbers, in a tag in the tray's colour at its top left corner. It scales with the zoom
+    // like everything on the table, but never gets too small to read.
+    const tag = Math.max(14, this.geo.S * 0.4 * cam.z)
+    const gap = tag * 0.3
     for (const t of this.trays) {
       if (!t.num) continue
       const x = (t.x - cam.x) * cam.z + vw / 2
@@ -2639,14 +2642,14 @@ export class Engine {
       this.dirty = true
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.beginPath()
-      ctx.roundRect(x + 6, y + 6, 20, 20, 6)
+      ctx.roundRect(x + gap, y + gap, tag, tag, tag * 0.3)
       ctx.fillStyle = TRAY_COLORS[t.color] || TRAY_COLORS.gray
       ctx.fill()
       ctx.fillStyle = '#fff'
-      ctx.font = '700 12px system-ui, -apple-system, sans-serif'
+      ctx.font = `700 ${Math.round(tag * 0.6)}px system-ui, -apple-system, sans-serif`
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      ctx.fillText(String(t.num), x + 16, y + 16.5)
+      ctx.fillText(String(t.num), x + gap + tag / 2, y + gap + tag / 2 + tag * 0.03)
       ctx.textAlign = 'start'
     }
     const sel = this.refSel && this.refs.find((r) => r.id === this.refSel)
