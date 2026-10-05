@@ -2179,28 +2179,52 @@ export class Engine {
     const mods = this.modules(ids)
     const boxes = mods.map((m) => this.bbox(m, this.packExtent))
     const spots = pack(boxes, this.geo.S)
+    // The grid's extent around its middle.
     let gx0 = Infinity
     let gx1 = -Infinity
+    let gy0 = Infinity
+    let gy1 = -Infinity
     boxes.forEach((b, k) => {
       gx0 = Math.min(gx0, spots[k][0] - (b.x1 - b.x0) / 2)
       gx1 = Math.max(gx1, spots[k][0] + (b.x1 - b.x0) / 2)
+      gy0 = Math.min(gy0, spots[k][1] - (b.y1 - b.y0) / 2)
+      gy1 = Math.max(gy1, spots[k][1] + (b.y1 - b.y0) / 2)
     })
+    const gw = gx1 - gx0
+    const gh = gy1 - gy0
     const moved = this.withGroups(ids)
     const rest = t.pieces.filter((i) => !moved.has(i))
-    let cx = t.x + t.w / 2
-    let cy = t.y + t.h / 2
-    let left = cx - (gx0 + gx1) / 2
+    // Where the grid's top left corner goes: the middle of an empty tray, else beside what's in it, on
+    // the side that makes the tray grow the least.
+    let left = t.x + t.w / 2 - gw / 2
+    let top = t.y + t.h / 2 - gh / 2
     if (rest.length) {
       const b = this.bbox(rest, this.packExtent)
-      left = b.x1 - gx0
-      cy = (b.y0 + b.y1) / 2
+      const mx = (b.x0 + b.x1) / 2 - gw / 2
+      const my = (b.y0 + b.y1) / 2 - gh / 2
+      let best = Infinity
+      for (const [x, y] of [
+        [b.x1, my],
+        [b.x0 - gw, my],
+        [mx, b.y1],
+        [mx, b.y0 - gh],
+      ]) {
+        const area = (Math.max(b.x1, x + gw) - Math.min(b.x0, x)) * (Math.max(b.y1, y + gh) - Math.min(b.y0, y))
+        if (area < best) {
+          best = area
+          left = x
+          top = y
+        }
+      }
     }
+    left -= gx0
+    top -= gy0
     const x0 = this.x.slice()
     const y0 = this.y.slice()
     mods.forEach((m, k) => {
       const b = boxes[k]
       const dx = left + spots[k][0] - (b.x0 + b.x1) / 2
-      const dy = cy + spots[k][1] - (b.y0 + b.y1) / 2
+      const dy = top + spots[k][1] - (b.y0 + b.y1) / 2
       for (const i of m) {
         this.x[i] += dx
         this.y[i] += dy
