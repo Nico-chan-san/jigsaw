@@ -1,5 +1,8 @@
 # Changelog
 
+## 5 October 2026
+
+- **Classic** pieces now look more like a real jigsaw: gently crooked rows of pieces, and smooth round tabs that are each a little different in place, size and tilt. Jigsaws you've already started get the new pieces too; everything still fits together.
 ## 4 October 2026
 
 - Hardcore mode is gone. Jigsaws that were made with it now have every piece face up.
