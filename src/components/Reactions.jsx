@@ -1,14 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Smile } from './icons.jsx'
 
-const REACTIONS = [
-  { kind: 'party', emoji: '🎉', label: 'Celebrate' },
-  { kind: 'heart', emoji: '❤️', label: 'Love' },
-  { kind: 'laugh', emoji: '😂', label: 'Laugh' },
-  { kind: 'fire', emoji: '🔥', label: 'Fire' },
-]
-const EMOJI = Object.fromEntries(REACTIONS.map((r) => [r.kind, r.emoji]))
+const KIND = 'party'
+const EMOJI = '🎉'
 
 // While the pointer is held down, this many reactions are thrown every TICK_MS.
 const TICK_MS = 60
@@ -44,28 +38,22 @@ function spawn(layer, emoji, sx, sy) {
   el.animate(frames, { duration: ms }).onfinish = () => el.remove()
 }
 
-// Header button with a drop-down of reactions. With one picked, pressing on the board pours it
+// Header button that turns the celebration on. While it is on, pressing on the board pours confetti
 // out of the pointer, for everyone in the room.
 export default function Reactions({ engine, busRef, hint }) {
-  const [open, setOpen] = useState(false)
-  const [kind, setKind] = useState(null)
-  // The last reaction picked, which R turns back on.
-  const last = useRef(REACTIONS[0].kind)
-  if (kind) last.current = kind
-  const wrap = useRef(null)
+  const [on, setOn] = useState(false)
   const layer = useRef(null)
   const host = engine.canvas.parentElement
 
-  const burst = (k, sx, sy) => {
-    const emoji = EMOJI[k]
-    if (!emoji || !layer.current) return
-    for (let i = 0; i < PER_TICK; i++) spawn(layer.current, emoji, sx, sy)
+  const burst = (sx, sy) => {
+    if (!layer.current) return
+    for (let i = 0; i < PER_TICK; i++) spawn(layer.current, EMOJI, sx, sy)
   }
 
   useEffect(() => {
     busRef.current = (msg) => {
       const { cam, vw, vh } = engine
-      burst(msg.kind, (msg.x - cam.x) * cam.z + vw / 2, (msg.y - cam.y) * cam.z + vh / 2)
+      burst((msg.x - cam.x) * cam.z + vw / 2, (msg.y - cam.y) * cam.z + vh / 2)
     }
     return () => (busRef.current = null)
   }, [engine, busRef])
@@ -77,24 +65,15 @@ export default function Reactions({ engine, busRef, hint }) {
       if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
       if (e.target?.closest?.('input, textarea, [contenteditable]')) return
       if (document.querySelector('.modal-bg')) return
-      setOpen(false)
-      setKind((k) => (k ? null : last.current))
+      setOn((v) => !v)
     }
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
   }, [])
 
-  // Close the drop-down on a press anywhere else.
+  // While on, a left press on the board pours it instead of reaching the engine.
   useEffect(() => {
-    if (!open) return
-    const away = (e) => !wrap.current?.contains(e.target) && setOpen(false)
-    window.addEventListener('pointerdown', away, true)
-    return () => window.removeEventListener('pointerdown', away, true)
-  }, [open])
-
-  // With a reaction picked, a left press on the board pours it instead of reaching the engine.
-  useEffect(() => {
-    if (!kind) return
+    if (!on) return
     const c = engine.canvas
     let stop = null
     const down = (e) => {
@@ -107,9 +86,9 @@ export default function Reactions({ engine, busRef, hint }) {
       }
       const up = (ev) => ev.pointerId === e.pointerId && stop()
       const emit = () => {
-        burst(kind, sx, sy)
+        burst(sx, sy)
         const [x, y] = engine.toWorld(sx, sy)
-        engine.send({ type: 'react', kind, x: Math.round(x), y: Math.round(y) })
+        engine.send({ type: 'react', kind: KIND, x: Math.round(x), y: Math.round(y) })
       }
       emit()
       const timer = setInterval(emit, TICK_MS)
@@ -124,7 +103,7 @@ export default function Reactions({ engine, busRef, hint }) {
         stop = null
       }
     }
-    const key = (e) => e.key === 'Escape' && setKind(null)
+    const key = (e) => e.key === 'Escape' && setOn(false)
     host.addEventListener('pointerdown', down, true)
     window.addEventListener('keydown', key)
     return () => {
@@ -132,50 +111,21 @@ export default function Reactions({ engine, busRef, hint }) {
       window.removeEventListener('keydown', key)
       stop?.()
     }
-  }, [engine, host, kind])
-
-  const pick = REACTIONS.find((r) => r.kind === kind)
+  }, [engine, host, on])
 
   return (
-    <span className="react-pick" ref={wrap}>
+    <span className="react-pick">
       <button
-        className={`icon-btn${kind ? ' on' : ''}`}
-        // With a reaction picked, the button turns it off; otherwise it opens the drop-down.
-        onClick={() => {
-          if (kind) {
-            setKind(null)
-            setOpen(false)
-          } else setOpen((o) => !o)
-        }}
-        aria-label="Reactions"
-        aria-expanded={open}
-        aria-pressed={!!kind}
+        className={`icon-btn${on ? ' on' : ''}`}
+        onClick={() => setOn((v) => !v)}
+        aria-label="Celebrate"
+        aria-pressed={on}
         aria-keyshortcuts="R"
-        title={pick ? `${pick.label}: press on the board to react. Click to stop (R)` : 'Reactions (R)'}
+        title={on ? 'Celebrate: press on the board to throw confetti. Click to stop (R)' : 'Celebrate (R)'}
       >
-        {pick ? <span className="react-emoji">{pick.emoji}</span> : <Smile />}
+        <span className="react-emoji">{EMOJI}</span>
         {hint}
       </button>
-      {open && (
-        <div className="react-menu" role="menu">
-          {REACTIONS.map((r) => (
-            <button
-              key={r.kind}
-              className={`icon-btn${r.kind === kind ? ' on' : ''}`}
-              role="menuitemradio"
-              aria-checked={r.kind === kind}
-              aria-label={r.label}
-              title={r.label}
-              onClick={() => {
-                setKind((k) => (k === r.kind ? null : r.kind))
-                setOpen(false)
-              }}
-            >
-              <span className="react-emoji">{r.emoji}</span>
-            </button>
-          ))}
-        </div>
-      )}
       {createPortal(<div ref={layer} className="reactions" />, host)}
     </span>
   )

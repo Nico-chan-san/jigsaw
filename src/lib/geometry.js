@@ -486,15 +486,15 @@ export function packExtent({ w, h, pad }) {
 }
 
 // Lays boxes ({ x0, y0, x1, y1 }) out in a square grid centred on 0, in reading order of where
-// they lie now (or in random order, with shuffle). Every column is as wide as its widest box and
+// they lie now (or in random order, with shuffle, or in the order given, with keep). Every column is as wide as its widest box and
 // every row as tall as its tallest. Returns the new centre of each box. S is the puzzle's piece
 // size (see buildPuzzle).
-export function pack(boxes, S, shuffle = false) {
+export function pack(boxes, S, shuffle = false, keep = false) {
   const gap = S * 0.12
   const mid = (b) => [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2]
   const order = boxes
     .map((b, k) => ({ k, x: mid(b)[0], row: Math.round(mid(b)[1] / (S * 1.5)) }))
-    .sort((a, b) => a.row - b.row || a.x - b.x)
+    .sort((a, b) => (keep ? a.k - b.k : a.row - b.row || a.x - b.x))
     .map((o) => o.k)
   if (shuffle)
     for (let i = order.length - 1; i > 0; i--) {

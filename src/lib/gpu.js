@@ -220,7 +220,8 @@ fn mask(p: vec2f) -> f32 {
 
 const premul = ([r, g, b, a]) => [r * a, g * a, b * a, a]
 
-export async function createGpu(canvas, atlas) {
+// canvas holds the table, top the trays and everything above the notes (see frame()).
+export async function createGpu(canvas, top, atlas) {
   if (!navigator.gpu) throw new Error('WebGPU is not available')
   const adapter = await navigator.gpu.requestAdapter()
   if (!adapter) throw new Error('No WebGPU adapter')
@@ -234,7 +235,10 @@ export async function createGpu(canvas, atlas) {
   if (!ctx) throw new Error('No WebGPU canvas context')
   const format = navigator.gpu.getPreferredCanvasFormat()
   ctx.configure({ device, format, alphaMode: 'opaque' })
-  const gpu = new Gpu(device, ctx, format, atlas)
+  const ctxTop = top.getContext('webgpu')
+  if (!ctxTop) throw new Error('No WebGPU canvas context')
+  ctxTop.configure({ device, format, alphaMode: 'premultiplied' })
+  const gpu = new Gpu(device, ctx, ctxTop, format, atlas)
   await gpu.init()
   return gpu
 }
@@ -242,9 +246,10 @@ export async function createGpu(canvas, atlas) {
 class Gpu {
   // atlas: { cells, spw, sph, levels }: how many sprites, their size in pixels, and how many mip
   // levels each comes with (the sprite and its halved copies).
-  constructor(device, ctx, format, { cells, spw, sph, levels }) {
+  constructor(device, ctx, ctxTop, format, { cells, spw, sph, levels }) {
     this.device = device
     this.ctx = ctx
+    this.ctxTop = ctxTop
     this.format = format
     this.onLost = null
     device.lost.then((info) => this.onLost?.(info.message || info.reason))
@@ -578,17 +583,15 @@ class Gpu {
       }
     }
 
-    const pass = enc.beginRenderPass({
+    // Two layers, with the notes (page elements) between them: the table (background, images, the
+    // pieces lying on it) under, and over them the trays, the pieces in them, the pieces being
+    // carried and the outlines.
+    let pass = enc.beginRenderPass({
       colorAttachments: [{ view: this.ctx.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }],
     })
     pass.setBindGroup(0, this.g0)
     pass.setPipeline(this.pipes.bg)
     pass.draw(3)
-    if (f.trays.count) {
-      pass.setPipeline(this.pipes.tray)
-      pass.setVertexBuffer(0, trays)
-      pass.draw(6, f.trays.count)
-    }
     if (f.refs.count) {
       pass.setPipeline(this.pipes.ref)
       pass.setBindGroup(1, this.gRef)
@@ -617,6 +620,17 @@ class Gpu {
       pass.setScissorRect(0, 0, W, H)
     }
     piecesOf(seg.still)
+    pass.end()
+    pass = enc.beginRenderPass({
+      colorAttachments: [{ view: this.ctxTop.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }],
+    })
+    pass.setBindGroup(0, this.g0)
+    if (f.trays.count) {
+      pass.setPipeline(this.pipes.tray)
+      pass.setVertexBuffer(0, trays)
+      pass.draw(6, f.trays.count)
+    }
+    if (seg.trayed) piecesOf(seg.trayed)
     if (sel && f.selUnder) outline(this.gSel, f.selBox)
     if (hl) outline(this.gHl, f.hlBox)
     extras.forEach((e, k) => outline(masks[k].group, e.box))

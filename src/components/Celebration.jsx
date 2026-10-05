@@ -2,9 +2,8 @@ import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 
 const EMOJI = '🎉'
-// Emojis shot from each bottom corner, and emojis raining from the top.
+// Emojis shot from each bottom corner.
 const CANNON = 70
-const RAIN = 90
 const MS = 4200
 
 // One emoji following a thrown arc: starts at (x, y) with velocity (vx, vy) px/s under gravity g.
@@ -54,19 +53,6 @@ export default function Celebration({ onDone }) {
           spin: (Math.random() - 0.5) * 900,
         })
       }
-    }
-    for (let i = 0; i < RAIN * k; i++) {
-      arc(el, {
-        x: Math.random() * W,
-        y: -40,
-        vx: (Math.random() - 0.5) * 80,
-        vy: 60 + Math.random() * 120,
-        g: H * 0.35,
-        ms: 2600 + Math.random() * 1200,
-        delay: 500 + Math.random() * 1400,
-        size: 0.8 + Math.random() * 0.9,
-        spin: (Math.random() - 0.5) * 600,
-      })
     }
     const timer = setTimeout(onDone, MS)
     return () => clearTimeout(timer)

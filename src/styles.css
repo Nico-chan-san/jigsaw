@@ -149,7 +149,8 @@ button {
 
 /* After a few seconds without the pointer or keyboard (see Room.jsx), the controls fade away. */
 .room .float,
-.room .podium-btn {
+.room .podium-btn,
+.room .share-btn {
   transition: opacity 0.2s ease;
 }
 .room .players {
@@ -159,6 +160,7 @@ button {
 }
 .room.idle .float,
 .room.idle .podium-btn,
+.room.idle .share-btn,
 .room.idle .players {
   opacity: 0;
   pointer-events: none;
@@ -1086,11 +1088,15 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   padding: 0 16px;
   text-align: center;
 }
-/* Other players' cursors: above the notes, below the panels. */
+/* Trays and what lies in them, drawn above the notes. */
+.room canvas.gpu.top {
+  z-index: 4;
+}
+/* Other players' cursors: above the notes and trays, below the panels. */
 .room canvas.cursors {
   position: absolute;
   inset: 0;
-  z-index: 3;
+  z-index: 5;
   width: 100%;
   height: 100%;
   pointer-events: none;
@@ -1260,31 +1266,6 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 .icon-btn.on .react-emoji {
   filter: drop-shadow(0 0 1px var(--bg));
 }
-.react-menu {
-  position: absolute;
-  top: calc(100% + 10px);
-  left: 50%;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: 11px;
-  background: var(--bg);
-  box-shadow: 0 8px 24px var(--shadow);
-  transform: translateX(-50%);
-  transform-origin: top center;
-  animation: react-drop 0.14s ease-out;
-}
-.react-menu .react-emoji {
-  font-size: 20px;
-}
-@keyframes react-drop {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) translateY(-6px) scaleY(0.9);
-  }
-}
 .reactions {
   position: absolute;
   inset: 0;
@@ -1404,7 +1385,7 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   position: absolute;
   top: 68px;
   right: 16px;
-  z-index: 4;
+  z-index: 5;
   width: 300px;
   max-height: calc(100% - 140px);
   overflow-y: auto;
@@ -2119,4 +2100,114 @@ button.link:hover {
 .modal.private-room {
   max-height: calc(100dvh - 32px);
   overflow-y: auto;
+}
+
+/* ---- right click menu ---- */
+
+.context-menu {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+.context-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.context-menu button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.context-menu button:not(:disabled):hover {
+  background: var(--hover);
+}
+.context-menu kbd {
+  color: var(--muted);
+  font: 600 11px/1 ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+/* Total time, under the players list heading. */
+.players .ptotal {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.players .ptotal svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Next to the podium button: copies a picture of the finished jigsaw and the podium. */
+.share-btn {
+  position: absolute;
+  bottom: 16px;
+  left: calc(50% + 52px + 12px);
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  color: inherit;
+  cursor: pointer;
+}
+.share-btn:hover {
+  background: var(--hover);
+}
+.share-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* A short message at the bottom of the window, which fades by itself. */
+.toast {
+  position: fixed;
+  bottom: 104px;
+  left: 50%;
+  z-index: 30;
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px var(--shadow);
+  font-weight: 600;
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: toast 2.5s ease forwards;
+}
+@keyframes toast {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+  }
+  8%,
+  80% {
+    opacity: 1;
+    transform: translateX(-50%);
+  }
+  100% {
+    opacity: 0;
+  }
 }

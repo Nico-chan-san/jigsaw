@@ -107,6 +107,10 @@ function Note({ note, engine, focus, selected, mark, canEdit, author, ensureName
       className={`note${selected ? ' sel' : mark ? ' marked' : ''}`}
       style={{ left: note.x, top: note.y, '--mark': mark }}
       data-note={note.id}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        engine.openNoteMenu(note.id, e.clientX, e.clientY)
+      }}
       onPointerMove={(e) => {
         if (e.buttons) return engine.showTip(null)
         const r = engine.canvas.getBoundingClientRect()
@@ -145,6 +149,10 @@ export function NotesLayer({ engine, roomId, me, nameOf, initial, busRef, create
   const S = engine.geo.S
 
   useEffect(() => {
+    engine.resetSeen('note', initial)
+  }, [engine, initial])
+
+  useEffect(() => {
     onNotes?.(notes)
   }, [notes, onNotes])
 
@@ -179,8 +187,16 @@ export function NotesLayer({ engine, roomId, me, nameOf, initial, busRef, create
         if (!send) return
         for (const n of latest.current) {
           const p = at.get(n.id)
-          if (p) api.saveNote(roomId, { ...n, x: p.x, y: p.y }, send === 'live')
+          if (!p) continue
+          const moved = { ...n, x: p.x, y: p.y }
+          api.saveNote(roomId, moved, send === 'live')
+          if (send === 'save') engine.trackObj('note', n.id, moved)
         }
+      },
+      // Puts a note back as it was (undo and redo).
+      put: (note) => {
+        setNotes((ns) => (ns.some((n) => n.id === note.id) ? ns.map((n) => (n.id === note.id ? note : n)) : [...ns, note]))
+        api.saveNote(roomId, note)
       },
       select: (ids) => setSelected(new Set(ids)),
       // Notes other players have selected, id -> their colour.
@@ -215,8 +231,12 @@ export function NotesLayer({ engine, roomId, me, nameOf, initial, busRef, create
 
   useEffect(() => {
     busRef.current = (msg) => {
-      if (msg.type === 'note-delete') return setNotes((ns) => ns.filter((n) => n.id !== msg.id))
+      if (msg.type === 'note-delete') {
+        engine.seen('note', msg.id, null)
+        return setNotes((ns) => ns.filter((n) => n.id !== msg.id))
+      }
       if (msg.type === 'notes-reset') {
+        engine.resetSeen('note', msg.notes)
         // Keep the text of a note that's being edited right now.
         const editing = document.activeElement?.closest?.('[data-note]')?.dataset.note
         return setNotes((ns) =>
@@ -224,6 +244,7 @@ export function NotesLayer({ engine, roomId, me, nameOf, initial, busRef, create
         )
       }
       const incoming = msg.note
+      engine.seen('note', incoming.id, incoming)
       setNotes((ns) => {
         const editing = document.activeElement?.closest?.(`[data-note="${incoming.id}"]`)
         const i = ns.findIndex((n) => n.id === incoming.id)
@@ -234,7 +255,7 @@ export function NotesLayer({ engine, roomId, me, nameOf, initial, busRef, create
       })
     }
     return () => (busRef.current = null)
-  }, [busRef])
+  }, [busRef, engine])
 
   useEffect(() => {
     createRef.current = async (clientX, clientY) => {
@@ -255,12 +276,16 @@ export function NotesLayer({ engine, roomId, me, nameOf, initial, busRef, create
       setNotes((ns) => [...ns, note])
       setFocusId(note.id)
       api.saveNote(roomId, note)
+      engine.trackObj('note', note.id, note)
     }
     return () => (createRef.current = null)
   }, [engine, roomId, S, createRef, requireName])
 
   const change = (id, patch) => setNotes((ns) => ns.map((n) => (n.id === id ? { ...n, ...patch } : n)))
-  const save = (note) => api.saveNote(roomId, note)
+  const save = (note) => {
+    api.saveNote(roomId, note)
+    engine.trackObj('note', note.id, note)
+  }
   const live = (note) => api.saveNote(roomId, note, true)
 
   return (

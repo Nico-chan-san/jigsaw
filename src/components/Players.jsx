@@ -37,6 +37,10 @@ export default function Players({ open, stats, times, notes, me, owner, nameOf, 
   return (
     <aside className={`players${open ? ' open' : ''}`}>
       <h2 className="label">Players</h2>
+      <p className="ptotal" title="Total time, all players">
+        <Clock />
+        Total time {formatTime(Object.values(times).reduce((a, b) => a + b, 0))}
+      </p>
       <ol>
         {list.map((p) => (
           <li key={p.id} className={p.id === me ? 'me' : ''}>

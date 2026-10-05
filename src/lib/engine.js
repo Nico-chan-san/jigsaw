@@ -41,6 +41,17 @@ const CLICK_PX = 5
 const HANDLE = 7
 // Cursor updates are throttled to this interval (ms); idle cursors vanish after CURSOR_IDLE.
 const CURSOR_MS = 50
+// How many moves of each player can be undone.
+const HISTORY = 100
+// Images, trays and notes as undo remembers them: plain copies. Two are the same when every field matches
+// (a tray's pieces are left out, they are tracked with the pieces).
+const snapObj = (o) => (o ? { ...o, pieces: o.pieces ? o.pieces.slice() : undefined } : null)
+const sameObj = (a, b) =>
+  !a || !b ? !a && !b : Object.keys(b).every((k) => k === 'pieces' || a[k] === b[k]) && Object.keys(a).every((k) => k === 'pieces' || b[k] === a[k])
+const snapSel = (e) => ({ p: new Set(e.sel), r: new Set(e.selRefs), n: new Set(e.selNotes) })
+const sameSet = (a, b) => a.size === b.size && [...a].every((v) => b.has(v))
+const sameSel = (a, b) => sameSet(a.p, b.p) && sameSet(a.r, b.r) && sameSet(a.n, b.n)
+const sameLook = (a, b) => a.x === b.x && a.y === b.y && a.r === b.r && a.g === b.g && a.by === b.by && a.t === b.t
 const CURSOR_IDLE = 20000
 // Our selection and hover go out at most this often (ms); the most outlines drawn for other players.
 const MARKS_MS = 100
@@ -97,7 +108,7 @@ const cursorColor = (id) => {
 }
 
 export class Engine {
-  constructor(canvas, { room, image, pieces, refs, trays, overlay, user, userName, nameOf, guard, tooltip, send, onStats, onComplete, onRef, onRefDelete, onTray, onTrayDelete, onSnap }) {
+  constructor(canvas, { room, image, pieces, refs, trays, overlay, user, userName, nameOf, guard, tooltip, send, onStats, onComplete, onRef, onRefDelete, onTray, onTrayDelete, onSnap, onMenu, onHistory }) {
     this.canvas = canvas
     // The table is drawn with WebGPU on a canvas stacked under the board (see startGpu() and
     // drawGpu()), the whole of it every frame. The board canvas only holds the small things on
@@ -105,6 +116,9 @@ export class Engine {
     this.ctx = canvas.getContext('2d')
     this.gpuEl = document.createElement('canvas')
     this.gpuEl.className = 'gpu'
+    // Over the notes: the trays and what lies in them, the pieces being carried and the outlines.
+    this.gpuTop = document.createElement('canvas')
+    this.gpuTop.className = 'gpu top'
     this.gpu = null
     // The camera the board was last drawn for.
     this.mv = { x: NaN, y: NaN, z: NaN, w: NaN, h: NaN }
@@ -126,12 +140,22 @@ export class Engine {
     this.onStats = onStats
     // Pieces just connected, by this player (local) or another: onSnap({ seams, local }). The sound ignores seams.
     this.onSnap = onSnap
+    // A right click on a piece, image, tray or note, without dragging: onMenu(sx, sy, kind, id). It is selected.
+    this.onMenu = onMenu
+    // Undo and redo, for this player's own moves: onHistory({ undo, redo }) says what is available.
+    this.onHistory = onHistory
     this.onComplete = onComplete
     // Reference image changes: onRef(ref, live) while and after editing, onRefDelete(id).
-    this.onRef = onRef
+    this.onRef = (ref, live) => {
+      onRef?.(ref, live)
+      if (!live) this.trackObj('ref', ref.id, ref)
+    }
     this.onRefDelete = onRefDelete
     // Tray changes: onTray(tray, live) while and after moving it, onTrayDelete(id).
-    this.onTray = onTray
+    this.onTray = (tray, live) => {
+      onTray?.(tray, live)
+      if (!live) this.trackObj('tray', tray.id, tray)
+    }
     this.onTrayDelete = onTrayDelete
     // Called with (cam, vw, vh) whenever the view changes, see addView().
     this.views = new Set()
@@ -212,8 +236,22 @@ export class Engine {
     // one is on top. One can be selected: space and G then work on its pieces, Delete removes it.
     this.trays = (trays || [])
       .filter((t) => isFinite(t.x) && isFinite(t.y) && t.w > 0 && t.h > 0)
-      .map((t) => ({ ...t, pieces: Array.isArray(t.pieces) ? t.pieces : [] }))
+      .map((t) => ({ ...t, auto: !!t.auto, pieces: Array.isArray(t.pieces) ? t.pieces : [] }))
     this.traySel = null
+    this.hist = { undo: [], redo: [] }
+    // What every piece looked like at the last move, by anyone, so each move knows what it changed.
+    this.sh = { x: this.x.slice(), y: this.y.slice(), r: this.r.slice(), g: this.g.slice(), by: this.by.slice() }
+    this.shTray = new Map()
+    this.trackTrays()
+    // Where trays that others move are headed: id -> { x, y, w, h }.
+    this.trayTo = new Map()
+    // Images, trays and notes as they were at the last change, by anyone, by id.
+    this.objSh = { ref: new Map(), tray: new Map(), note: new Map() }
+    this.resetSeen('ref', this.refs)
+    this.resetSeen('tray', this.trays)
+    this.pend = null
+    this.inPress = false
+    this.pressId = 0
     this.refAspect = image.naturalHeight / image.naturalWidth
     const rk = Math.min(1, 2048 / Math.max(image.naturalWidth, image.naturalHeight))
     this.refImg = document.createElement('canvas')
@@ -267,7 +305,7 @@ export class Engine {
   // later go there as they come, see setSprite().
   async startGpu() {
     const [spw, sph] = spriteSize(this.geo, this.margin, this.spriteScale)
-    const gpu = await createGpu(this.gpuEl, { cells: this.n, spw, sph, levels: MIPS + 1 })
+    const gpu = await createGpu(this.gpuEl, this.gpuTop, { cells: this.n, spw, sph, levels: MIPS + 1 })
     if (this.raf === -1) return gpu.destroy()
     this.gpu = gpu
     // Per frame: the pieces' instances (still, active, lifted, then the outlined ones again), trays and images.
@@ -279,6 +317,7 @@ export class Engine {
     gpu.setRefImage(this.refImg)
     this.sprites.forEach((lv, i) => lv && gpu.upload(i, lv))
     this.canvas.before(this.gpuEl)
+    this.canvas.after(this.gpuTop)
     this.resize()
   }
 
@@ -380,6 +419,7 @@ export class Engine {
     this.gpu?.destroy()
     this.gpu = null
     this.gpuEl.remove()
+    this.gpuTop.remove()
   }
 
   resize() {
@@ -387,7 +427,7 @@ export class Engine {
     this.dpr = Math.min(MAX_DPR, window.devicePixelRatio || 1)
     this.vw = Math.max(1, rect.width)
     this.vh = Math.max(1, rect.height)
-    for (const c of [this.canvas, this.gpuEl, this.overlay]) {
+    for (const c of [this.canvas, this.gpuEl, this.gpuTop, this.overlay]) {
       if (!c) continue
       c.width = Math.round(this.vw * this.dpr)
       c.height = Math.round(this.vh * this.dpr)
@@ -571,6 +611,7 @@ export class Engine {
   // its pieces (without outlining them), so space and G work on them too. With loose, groups that
   // are in a tray are left out, so turning or sorting a selection leaves the trays as they are.
   freeSelection(loose = false) {
+    if (this.done) return []
     const now = performance.now()
     if (!this.sel.size && this.traySel) {
       const t = this.trays.find((x) => x.id === this.traySel)
@@ -613,11 +654,14 @@ export class Engine {
   }
 
   setSelection(set, refs = new Set(), notes = new Set()) {
+    const before = this.noSelHistory ? null : snapSel(this)
+    if (this.done && set.size) set = new Set()
     const same = (a, b) => a.size === b.size && [...a].every((v) => b.has(v))
     this.sel = set
     this.selRefs = refs
     if (!same(notes, this.selNotes)) this.notes?.select(notes)
     this.selNotes = notes
+    if (before) this.recordSel(before)
     this.sendMarks()
     this.invalidate()
   }
@@ -807,6 +851,23 @@ export class Engine {
     return c
   }
 
+  // What a point on the screen is over: an image (rh, or its resize handle), a tray (th) or a piece (i).
+  // From the top: pieces in a tray, trays, the pieces lying on the table, images.
+  pick(sx, sy) {
+    let rh = this.refHit(sx, sy)
+    const th = this.trayHit(sx, sy)
+    if (rh && rh.mode === 'move' && th) rh = null
+    const i = rh && rh.mode !== 'move' ? -1 : this.pieceAt(...this.toWorld(sx, sy), th)
+    return { rh, th: rh ? null : th, i }
+  }
+
+  // The piece to act on at a point: a tray lies over the pieces on the table, so under one, only the
+  // pieces in that tray count.
+  pieceAt(wx, wy, th) {
+    const i = this.hit(wx, wy)
+    return i >= 0 && th && !th.tray.pieces.includes(i) ? -1 : i
+  }
+
   hit(wx, wy) {
     const R = this.radius
     for (let k = this.order.length - 1; k >= 0; k--) {
@@ -835,6 +896,7 @@ export class Engine {
     const [sx, sy] = this.pos(e)
     this.canvas.setPointerCapture(e.pointerId)
     this.pointers.set(e.pointerId, [sx, sy])
+    this.inPress = true
     this.camAnim = null
 
     if (this.drag) {
@@ -850,14 +912,34 @@ export class Engine {
       this.invalidate()
       return
     }
+    // The auto sort switch on a tray.
+    if (e.button === 0 && !this.panMode) {
+      const t = this.badgeAt(sx, sy)
+      if (t) return this.setTrayAuto(t.id, !t.auto)
+    }
     // Right (or middle) button drags the table, as does any press in view mode.
-    if (e.button === 1 || e.button === 2 || (this.panMode && e.button === 0)) return this.startPan(e.pointerId, sx, sy)
+    if (e.button === 1 || e.button === 2 || (this.panMode && e.button === 0)) {
+      let menu = null
+      if (e.button === 2) {
+        const { rh, th, i: at } = this.pick(sx, sy)
+        // A finished jigsaw is left alone: no lifting, moving or turning it.
+        const i = this.done ? -1 : at
+        if (i >= 0) {
+          if (!(this.held.get(i) > performance.now())) menu = { kind: 'piece', i }
+        } else if (rh) menu = { kind: 'ref', id: rh.ref.id }
+        else if (th) menu = { kind: 'tray', id: th.tray.id }
+        if (menu) Object.assign(menu, { sx, sy })
+      }
+      this.startPan(e.pointerId, sx, sy)
+      this.pan.menu = menu
+      return
+    }
     if (e.button !== 0) return
 
     const [wx, wy] = this.toWorld(sx, sy)
-    const rh = this.refHit(sx, sy)
-    const th = rh ? null : this.trayHit(sx, sy)
-    const i = rh && rh.mode !== 'move' ? -1 : this.hit(wx, wy)
+    const picked = this.pick(sx, sy)
+    const { rh, th } = picked
+    const i = this.done ? -1 : picked.i
     if (i >= 0) {
       if (this.held.get(i) > performance.now()) return
       if (this.guard && !this.guard()) return
@@ -917,6 +999,27 @@ export class Engine {
     this.setHighlight(null)
   }
 
+  // A right click on a piece, image or tray (m.kind): selects it, as a click would, and asks for the menu.
+  openMenu(m) {
+    if (!this.onMenu) return
+    this.selectRef(null)
+    this.selectTray(null)
+    if (m.kind === 'piece') {
+      if (!this.sel.has(m.i)) this.setSelection(new Set(this.members(this.g[m.i])))
+    } else {
+      this.setSelection(new Set(), new Set(), new Set(m.kind === 'note' ? [m.id] : []))
+      if (m.kind === 'ref') this.selectRef(m.id)
+      if (m.kind === 'tray') this.selectTray(m.id)
+    }
+    this.onMenu(m.sx, m.sy, m.kind, m.id)
+  }
+
+  // The same for a note, which is not part of the canvas: at a window position.
+  openNoteMenu(id, x, y) {
+    const r = this.canvas.getBoundingClientRect()
+    this.openMenu({ kind: 'note', id, sx: x - r.left, sy: y - r.top })
+  }
+
   onMove(e) {
     const [sx, sy] = this.pos(e)
     if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, [sx, sy])
@@ -974,6 +1077,8 @@ export class Engine {
       this.cam.y -= (sy - this.pan.sy) / this.cam.z
       this.pan.sx = sx
       this.pan.sy = sy
+      const m = this.pan.menu
+      if (m && Math.hypot(sx - m.sx, sy - m.sy) > CLICK_PX) this.pan.menu = null
       this.clampCam()
       this.invalidate()
       return
@@ -1001,8 +1106,10 @@ export class Engine {
     }
     if (this.carry && e.pointerId === this.carry.pointer) this.endCarry()
     if (this.pan && e.pointerId === this.pan.pointer) {
+      const m = this.pan.menu
       this.pan = null
       this.canvas.style.cursor = this.panMode ? 'grab' : ''
+      if (m && !this.drag) this.openMenu(m)
     }
     if (this.marquee && e.pointerId === this.marquee.pointer) {
       this.marquee = null
@@ -1016,6 +1123,11 @@ export class Engine {
       this.onRef?.(ref, false)
     }
     if (this.pointers.size < 2) this.pinch = null
+    // The next press is a new gesture, for undo.
+    if (!this.pointers.size) {
+      this.inPress = false
+      this.pressId++
+    }
   }
 
   // Selects every group with a piece centre inside the box.
@@ -1074,6 +1186,11 @@ export class Engine {
       e.preventDefault()
       return this.selectAll()
     }
+    // Cmd/Ctrl+Z undoes, with shift (or Ctrl+Y) redoes.
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && (key === 'z' || key === 'y') && !this.drag) {
+      e.preventDefault()
+      return key === 'y' || e.shiftKey ? this.redo() : this.undo()
+    }
     if (e.ctrlKey || e.metaKey || e.altKey) return
     // Arrow keys and WASD move around the table while held, also while carrying pieces.
     if (PAN_KEYS[key]) {
@@ -1123,10 +1240,14 @@ export class Engine {
       return this.showTip(null)
     }
     const [wx, wy] = this.toWorld(sx, sy)
-    const rh = this.refHit(sx, sy)
-    const th = rh ? null : this.trayHit(sx, sy)
-    const i = rh && rh.mode !== 'move' ? -1 : this.hit(wx, wy)
-    this.canvas.style.cursor = this.cursorFor(i, rh, th)
+    const badge = this.badgeAt(sx, sy)
+    if (badge) {
+      this.canvas.style.cursor = 'pointer'
+      this.setHighlight(null)
+      return this.showTip({ text: badge.auto ? 'Auto sort is on: pieces put in this tray sort themselves' : 'Auto sort: sort the pieces put in this tray', sx, sy })
+    }
+    const { rh, th, i } = this.pick(sx, sy)
+    this.canvas.style.cursor = this.cursorFor(this.done ? -1 : i, rh, th)
     let hl = null
     if (i >= 0 && this.by[i] && this.connected(i)) {
       const ids = this.cellsOf(i)
@@ -1358,7 +1479,7 @@ export class Engine {
   // With whole (shift), the selection turns as one around its common centre.
   rotateSelection(dir, whole = false) {
     if (this.guard && !this.guard()) return
-    const ids = this.freeSelection(true)
+    const ids = this.freeSelection()
     if (!ids.length) return
     this.settle(ids)
     const mods = this.modules(ids)
@@ -1377,16 +1498,19 @@ export class Engine {
       }
       turned.push({ ids: m, cx: r2(cx), cy: r2(cy), d: dir })
     }
-    const changed = this.snapModules(mods)
+    // Pieces in a tray turn where they lie and don't snap to anything.
+    const inTray = new Set(this.trays.flatMap((t) => t.pieces))
+    const changed = this.snapModules(mods.filter((m) => !m.some((i) => inTray.has(i))))
+    for (const i of ids) changed.add(i)
     this.fitTraysOf(ids)
     this.commit(changed, turned)
   }
 
   // Lays the selected modules out in a square grid, centred where the selection lies now.
   // With shuffle (shift), in random order rather than the order they lie in.
-  sortSelection(shuffle = false) {
+  sortSelection(shuffle = false, only = null) {
     if (this.guard && !this.guard()) return
-    const ids = this.freeSelection(true)
+    const ids = only || this.freeSelection(true)
     if (!ids.length) return
     this.settle(ids)
     const mods = this.modules(ids)
@@ -1394,7 +1518,7 @@ export class Engine {
     const cx = (all.x0 + all.x1) / 2
     const cy = (all.y0 + all.y1) / 2
     const boxes = mods.map((m) => this.bbox(m, this.packExtent))
-    const spots = pack(boxes, this.geo.S, shuffle)
+    const spots = pack(boxes, this.geo.S, shuffle, !!only)
     const x0 = this.x.slice()
     const y0 = this.y.slice()
     mods.forEach((m, k) => {
@@ -1420,8 +1544,11 @@ export class Engine {
 
   // Tells everyone where these pieces ended up (after a drop, turn or sort) and updates the rest.
   // turns: the spins around a point that got them there ({ ids, cx, cy, d }), so others can show them.
-  commit(changed, turns) {
+  commit(changed, turns, record = true) {
     this.growSelection()
+    const items = this.track(changed)
+    if (record && items.length) this.queue({ items })
+    this.notifyHistory()
     this.send({
       type: 'moves',
       turns,
@@ -1432,17 +1559,291 @@ export class Engine {
     })
     this.emitStats()
     this.invalidate()
-    this.checkComplete()
+    this.checkComplete(true)
+  }
+
+  // Which tray each piece lies in now.
+  trayMap() {
+    const m = new Map()
+    for (const t of this.trays) for (const i of t.pieces) m.set(i, t.id)
+    return m
+  }
+
+  trackTrays() {
+    this.shTray = this.trayMap()
+  }
+
+  // Compares the pieces with the snapshot and returns what changed, as { i, b, a } (before and after).
+  // The snapshot catches up.
+  track(changed) {
+    const sh = this.sh
+    const now = this.trayMap()
+    const items = []
+    for (const i of changed) {
+      const [x, y] = this.moving.get(i) || [this.x[i], this.y[i]]
+      const a = { x, y, r: this.r[i], g: this.g[i], by: this.by[i] || null, t: now.get(i) || null }
+      const b = { x: sh.x[i], y: sh.y[i], r: sh.r[i], g: sh.g[i], by: sh.by[i] || null, t: this.shTray.get(i) || null }
+      sh.x[i] = x
+      sh.y[i] = y
+      sh.r[i] = a.r
+      sh.g[i] = a.g
+      sh.by[i] = a.by
+      if (a.t) this.shTray.set(i, a.t)
+      else this.shTray.delete(i)
+      if (!sameLook(a, b)) items.push({ i, a, b })
+    }
+    return items
+  }
+
+  notifyHistory() {
+    this.onHistory?.({ undo: this.hist.undo.length > 0, redo: this.hist.redo.length > 0 })
+  }
+
+  // ---- history of images, trays, notes and the selection ----------------------
+
+  // Remembers what an image, tray or note looked like (obj, or null once it is gone) as a change
+  // of this player's, which undo can reverse. extra is merged into what it was before.
+  trackObj(kind, id, obj, extra) {
+    const sh = this.objSh[kind]
+    const b = sh.get(id) || null
+    const a = snapObj(obj)
+    if (a) sh.set(id, a)
+    else sh.delete(id)
+    if (this.replaying || sameObj(a, b)) return
+    this.queue({ objs: [{ kind, id, b: b && extra ? { ...b, ...extra } : b, a }] })
+  }
+
+  // The same, for a change someone else made: nothing to undo here, just keeps up.
+  seen(kind, id, obj) {
+    if (obj) this.objSh[kind].set(id, snapObj(obj))
+    else this.objSh[kind].delete(id)
+  }
+
+  resetSeen(kind, list) {
+    this.objSh[kind] = new Map(list.map((o) => [o.id, snapObj(o)]))
+  }
+
+  // Everything changed in one go (the same moment) is one step to undo.
+  queue(part) {
+    if (!this.pend) {
+      this.pend = { items: [], objs: [], press: this.inPress ? this.pressId : null }
+      queueMicrotask(() => this.flush())
+    }
+    if (part.items) this.pend.items.push(...part.items)
+    if (part.objs) this.pend.objs.push(...part.objs)
+  }
+
+  flush() {
+    const q = this.pend
+    this.pend = null
+    if (!q || (!q.items.length && !q.objs.length)) return
+    const h = this.hist
+    const now = performance.now()
+    const top = h.undo[h.undo.length - 1]
+    // Selecting what is then moved, in the same press, is part of that move.
+    if (top?.sel && q.press !== null && top.press === q.press) h.undo.pop()
+    else if (top && !top.sel && !q.items.length && q.objs.length === 1 && top.objs.length === 1 && !top.items.length && now - top.t < 10000) {
+      // Typing in a note is one step, not one per pause.
+      const o = q.objs[0]
+      const t = top.objs[0]
+      if (o.kind === 'note' && t.kind === 'note' && o.id === t.id && o.b && o.a && t.b && t.a) {
+        t.a = o.a
+        top.t = now
+        h.redo.length = 0
+        return this.notifyHistory()
+      }
+    }
+    h.undo.push({ items: q.items, objs: q.objs, t: now })
+    if (h.undo.length > HISTORY) h.undo.shift()
+    h.redo.length = 0
+    this.notifyHistory()
+  }
+
+  // Called from setSelection with what was selected before.
+  recordSel(before) {
+    const after = snapSel(this)
+    if (sameSel(before, after)) return
+    const h = this.hist
+    const press = this.inPress ? this.pressId : null
+    const top = h.undo[h.undo.length - 1]
+    // Dragging out a box is one selection, not one per move.
+    if (press !== null && top?.sel && top.press === press) {
+      top.sel.a = after
+      if (sameSel(top.sel.a, top.sel.b)) h.undo.pop()
+    } else h.undo.push({ sel: { b: before, a: after }, press })
+    if (h.undo.length > HISTORY) h.undo.shift()
+    this.notifyHistory()
+  }
+
+  undo() {
+    this.stepHistory(this.hist.undo, this.hist.redo, 'a', 'b')
+  }
+
+  redo() {
+    this.stepHistory(this.hist.redo, this.hist.undo, 'b', 'a')
+  }
+
+  // Puts an image, tray or note into the state v (null: gone).
+  applyObj(kind, id, v) {
+    if (kind === 'note') {
+      if (!this.notes) return
+      if (v) this.notes.put(v)
+      else this.notes.remove([id])
+      this.seen('note', id, v)
+      return
+    }
+    const list = kind === 'ref' ? this.refs : this.trays
+    const cur = list.find((o) => o.id === id)
+    if (!v) return cur && (kind === 'ref' ? this.removeRef(id) : this.removeTray(id))
+    if (kind === 'ref') {
+      if (cur) Object.assign(cur, v)
+      else this.refs.push({ ...v })
+      this.onRef(cur || this.refs[this.refs.length - 1], false)
+      return
+    }
+    const { pieces, ...rest } = v
+    if (cur) {
+      Object.assign(cur, rest)
+      this.onTray(cur, false)
+      return
+    }
+    // A tray that was removed comes back with its pieces (those not in another tray by now), and its
+    // number if that is still free.
+    const taken = new Set(this.trays.flatMap((t) => t.pieces))
+    const t = { ...rest, pieces: (pieces || []).filter((i) => !taken.has(i)) }
+    if (t.num && this.trays.some((x) => x.num === t.num)) {
+      const used = new Set(this.trays.map((x) => x.num))
+      t.num = 0
+      for (let n = 1; n <= 9 && !t.num; n++) if (!used.has(n)) t.num = n
+    }
+    this.trays.push(t)
+    if (t.pieces.length) this.fitTray(t)
+    this.onTray(t, false)
+  }
+
+  // Takes the latest entry off one stack and puts it back, onto the other. Pieces, images, trays
+  // and notes someone else has changed since, or pieces they are holding now, stay as they are. An
+  // entry with nothing left to restore is dropped, and the next one is tried.
+  stepHistory(from, to, expect, set) {
+    if (this.drag || !from.length) return
+    if (this.guard && !this.guard()) return
+    const sh = this.sh
+    const now = performance.now()
+    while (from.length) {
+      const e = from.pop()
+      if (e.sel) {
+        // Skip a selection that is the one we have anyway, so a press always does something.
+        const v = e.sel[set]
+        if (sameSel(v, snapSel(this))) continue
+        this.noSelHistory = true
+        this.selectRef(null)
+        this.selectTray(null)
+        this.setSelection(new Set(v.p), new Set([...v.r].filter((id) => this.refs.some((r) => r.id === id))), new Set(v.n))
+        this.noSelHistory = false
+        to.push(e)
+        return this.notifyHistory()
+      }
+      const objs = e.objs.filter((o) => sameObj(this.objSh[o.kind].get(o.id) || null, o[expect]))
+      const items = e.items.filter((it) => {
+        const w = it[expect]
+        return (
+          !(this.held.get(it.i) > now) &&
+          sameLook({ x: sh.x[it.i], y: sh.y[it.i], r: sh.r[it.i], g: sh.g[it.i], by: sh.by[it.i] || null, t: this.shTray.get(it.i) || null }, w)
+        )
+      })
+      if (!items.length && !objs.length) continue
+      this.replaying = true
+      for (const o of objs) this.applyObj(o.kind, o.id, o[set])
+      const ids = items.map((it) => it.i)
+      this.settle(ids)
+      const touched = new Set()
+      for (const { i, [set]: v } of items) {
+        if (Math.hypot(v.x - this.x[i], v.y - this.y[i]) > 1e-6) this.moving.set(i, [v.x, v.y])
+        const d = ((v.r - this.r[i] + 5) % 4) - 1
+        if (d) this.turns.set(i, { self: true, a: -d * Q })
+        this.r[i] = v.r
+        this.g[i] = v.g
+        this.by[i] = v.by
+        const cur = this.shTray.get(i) || null
+        if (cur !== v.t) {
+          for (const t of this.trays) {
+            const k = t.pieces.indexOf(i)
+            if (k >= 0) {
+              t.pieces.splice(k, 1)
+              touched.add(t)
+            }
+          }
+          const t = v.t && this.trays.find((x) => x.id === v.t)
+          if (t) {
+            t.pieces.push(i)
+            touched.add(t)
+          }
+        }
+      }
+      if (ids.length) this.toTop(new Set(ids))
+      this.refitTrays(touched)
+      this.trackTrays()
+      this.replaying = false
+      to.push({ items, objs, t: now })
+      if (ids.length) {
+        this.noSelHistory = true
+        this.setSelection(new Set(ids))
+        this.noSelHistory = false
+        this.commit(new Set(ids), undefined, false)
+      } else {
+        this.invalidate()
+        this.notifyHistory()
+      }
+      return
+    }
+    this.notifyHistory()
   }
 
   // The moment the last piece goes in, by anyone: tell the page and bring the whole jigsaw into view.
-  checkComplete() {
+  // local: this player's own move finished it, so this player tidies up (see finish()).
+  checkComplete(local = false) {
     const done = this.isComplete()
-    if (done && !this.done) {
-      this.onComplete?.()
-      setTimeout(() => this.fit(), 250)
-    }
+    const was = this.done
     this.done = done
+    if (done && !was) {
+      this.onComplete?.()
+      if (local) this.finish()
+      setTimeout(() => this.fit(), 900)
+    }
+  }
+
+  // The jigsaw is done: it turns the right way up, and the trays, images and notes are cleared away.
+  finish() {
+    if (this.drag) return
+    const ids = Array.from({ length: this.n }, (_, i) => i)
+    this.settle(ids)
+    const k = (4 - this.r[0]) % 4
+    if (k) {
+      const b = this.bbox(ids, 0)
+      const cx = (b.x0 + b.x1) / 2
+      const cy = (b.y0 + b.y1) / 2
+      // A quarter turn either way, or half a turn.
+      const dir = k === 3 ? -1 : 1
+      const t = { cx, cy, a: -(k === 2 ? 2 : dir) * Q }
+      for (const i of ids) {
+        const [rx, ry] = rot(this.x[i] - cx, this.y[i] - cy, k)
+        this.x[i] = cx + rx
+        this.y[i] = cy + ry
+        this.r[i] = 0
+        this.turns.set(i, t)
+      }
+      this.commit(ids, [{ ids, cx: r2(cx), cy: r2(cy), d: dir }])
+    }
+    for (const t of [...this.trays]) this.removeTray(t.id)
+    for (const r of [...this.refs]) this.removeRef(r.id)
+    const notes = this.notes?.get().map((n) => n.id) || []
+    if (notes.length) {
+      this.notes.remove(notes)
+      for (const id of notes) this.trackObj('note', id, null)
+    }
+    this.setSelection(new Set())
+    this.selectRef(null)
+    this.selectTray(null)
   }
 
   dragState() {
@@ -1491,10 +1892,20 @@ export class Engine {
     }
   }
 
+  // Not playing (a dialog is open): others see no cursor from us until we're back.
+  setAway(away) {
+    if (this.away === away) return
+    this.away = away
+    if (away) {
+      clearTimeout(this.cursorTimer)
+      this.send({ type: 'cursor', hide: true })
+    } else this.sendCursor(true)
+  }
+
   sendCursor(force) {
     const now = performance.now()
     clearTimeout(this.cursorTimer)
-    if (!this.pointerAt) return
+    if (!this.pointerAt || this.away) return
     if (force || now - this.lastCursor >= CURSOR_MS) {
       this.lastCursor = now
       const [x, y] = this.toWorld(...this.pointerAt)
@@ -1554,8 +1965,10 @@ export class Engine {
     this.canvas.style.cursor = ''
     // Pieces carried along with their tray stay in it, wherever it's let go.
     const tray = this.carry?.trays[0] && this.trays.find((t) => t.id === this.carry.trays[0].id)
-    this.placeInTrays(d.ids, d.px, d.py, tray)
+    const change = this.placeInTrays(d.ids, d.px, d.py, tray)
     this.commit(changed)
+    // Moving a whole tray doesn't sort it again.
+    if (!tray) this.autoSort(change)
   }
 
   snap(ids) {
@@ -1697,7 +2110,7 @@ export class Engine {
     this.devEase(ids, from)
     this.toTop(new Set(ids))
     this.placeInTrays(ids, this.x[q], this.y[q], this.trays.find((t) => t.pieces.includes(q)) || null)
-    this.commit(changed)
+    this.commit(changed, undefined, false)
   }
 
   // Puts every piece in place around the biggest group, finishing the jigsaw.
@@ -1716,7 +2129,7 @@ export class Engine {
     this.joined(g0, ids, true)
     this.devEase(ids, from)
     this.toTop(new Set(ids))
-    this.commit(all)
+    this.commit(all, undefined, false)
   }
 
   // Starts the jigsaw over: every piece apart and laid out afresh, as a new jigsaw would be, nobody
@@ -1738,7 +2151,7 @@ export class Engine {
     const full = this.trays.filter((t) => t.pieces.length)
     for (const t of full) t.pieces = []
     this.refitTrays(full)
-    this.commit(layout.map((p) => p.i))
+    this.commit(layout.map((p) => p.i), undefined, false)
     setTimeout(() => this.fit(), 250)
   }
 
@@ -1828,6 +2241,12 @@ export class Engine {
       this.r[p.i] = p.r
       this.g[p.i] = p.g
       if (p.by !== undefined) this.by[p.i] = p.by
+      const sh = this.sh
+      sh.x[p.i] = p.x
+      sh.y[p.i] = p.y
+      sh.r[p.i] = p.r
+      sh.g[p.i] = p.g
+      sh.by[p.i] = this.by[p.i]
       touched.add(p.i)
     }
     // Pieces someone turned spin into place from where they lay, as they do on that player's screen.
@@ -1887,12 +2306,17 @@ export class Engine {
     const notes = [...this.selNotes]
     if (this.traySel) this.removeTray(this.traySel)
     for (const id of refs) this.removeRef(id)
-    if (notes.length) this.notes?.remove(notes)
+    if (notes.length) {
+      this.notes?.remove(notes)
+      for (const id of notes) this.trackObj('note', id, null)
+    }
     this.setSelection(this.sel)
   }
 
   removeRef(id, remote = false) {
     if (!remote && this.guard && !this.guard()) return
+    if (remote) this.seen('ref', id, null)
+    else this.trackObj('ref', id, null)
     this.refs = this.refs.filter((r) => r.id !== id)
     if (this.refSel === id) this.refSel = null
     this.selRefs.delete(id)
@@ -1907,6 +2331,7 @@ export class Engine {
     const cur = this.refs.find((r) => r.id === ref.id)
     if (cur) Object.assign(cur, ref)
     else this.refs.push(ref)
+    this.seen('ref', ref.id, cur || ref)
     this.invalidate()
   }
 
@@ -1915,6 +2340,7 @@ export class Engine {
     this.refs = refs.map((r) => (dragging && r.id === dragging.id ? dragging : r))
     if (this.refSel && !this.refs.some((r) => r.id === this.refSel)) this.refSel = null
     for (const id of this.selRefs) if (!this.refs.some((r) => r.id === id)) this.selRefs.delete(id)
+    this.resetSeen('ref', this.refs)
     this.invalidate()
   }
 
@@ -2039,6 +2465,7 @@ export class Engine {
       h,
       color,
       num,
+      auto: false,
       pieces: [],
       author: this.user || '',
     }
@@ -2070,10 +2497,14 @@ export class Engine {
 
   removeTray(id, remote = false) {
     if (!remote && this.guard && !this.guard()) return
+    const gone = this.trays.find((t) => t.id === id)
+    if (remote) this.seen('tray', id, null)
+    else this.trackObj('tray', id, null, { pieces: gone ? gone.pieces.slice() : [] })
     this.trays = this.trays.filter((t) => t.id !== id)
     if (this.traySel === id) this.traySel = null
     if (this.carry) this.carry.trays = this.carry.trays.filter((t) => t.id !== id)
     if (!remote) this.onTrayDelete?.(id)
+    this.trackTrays()
     this.invalidate()
   }
 
@@ -2081,14 +2512,24 @@ export class Engine {
   remoteTray(tray) {
     if (this.carry?.trays.some((t) => t.id === tray.id)) return
     const cur = this.trays.find((t) => t.id === tray.id)
-    if (cur) Object.assign(cur, tray)
-    else this.trays.push({ ...tray, pieces: tray.pieces || [] })
+    if (cur) {
+      // Its box eases to the new place, as the pieces carried in it do.
+      const { x, y, w, h, ...rest } = tray
+      Object.assign(cur, rest)
+      if ([x, y, w, h].every(isFinite)) this.trayTo.set(cur.id, { x, y, w, h })
+      else Object.assign(cur, { x, y, w, h })
+    } else this.trays.push({ ...tray, pieces: tray.pieces || [] })
+    this.seen('tray', tray.id, cur ? { ...cur, ...tray } : tray)
+    this.trackTrays()
     this.invalidate()
   }
 
   setTrays(trays) {
-    this.trays = trays.map((t) => ({ ...t, pieces: t.pieces || [] }))
+    this.trays = trays.map((t) => ({ ...t, auto: !!t.auto, pieces: t.pieces || [] }))
+    this.trayTo.clear()
     if (this.traySel && !this.trays.some((t) => t.id === this.traySel)) this.traySel = null
+    this.resetSeen('tray', this.trays)
+    this.trackTrays()
     this.invalidate()
   }
 
@@ -2104,9 +2545,17 @@ export class Engine {
 
   // The pieces to carry with a tray: its own, with the rest of their groups, less any that someone
   // else is holding.
-  trayPieces(t) {
+  // With ordered, in the order they came into the tray, new ones last.
+  trayPieces(t, ordered = false) {
     const now = performance.now()
-    return [...this.withGroups(t.pieces)].filter((i) => !(this.held.get(i) > now))
+    const all = this.withGroups(t.pieces)
+    const list = [...all]
+    if (ordered) {
+      const rank = new Map()
+      for (const i of t.pieces) if (!rank.has(this.g[i])) rank.set(this.g[i], rank.size)
+      list.sort((a, b) => rank.get(this.g[a]) - rank.get(this.g[b]))
+    }
+    return list.filter((i) => !(this.held.get(i) > now))
   }
 
   // Where a piece is going, if it's still easing there.
@@ -2158,13 +2607,56 @@ export class Engine {
     }
     const moved = this.withGroups(ids)
     const touched = new Set(into ? [into] : [])
+    const left = []
     for (const t of this.trays) {
       if (t === into || !t.pieces.some((i) => moved.has(i))) continue
       t.pieces = t.pieces.filter((i) => !moved.has(i))
       touched.add(t)
+      left.push(t)
     }
     if (into) into.pieces = [...new Set([...into.pieces, ...moved])]
     this.refitTrays(touched)
+    return { into, left }
+  }
+
+  // Trays set to sort by themselves lay everything in them out in a grid, after pieces were put in
+  // them or taken out (what placeInTrays returned).
+  autoSort(change) {
+    if (!change) return
+    const list = change.into || change.left ? [change.into, ...(change.left || [])] : [change]
+    for (const t of list) if (t?.auto && t.pieces.length) this.sortSelection(false, this.trayPieces(t, true))
+  }
+
+  // Turns a tray's own sorting on or off, for everyone. Turning it on sorts what is in it now.
+  setTrayAuto(id, on) {
+    const t = this.trays.find((x) => x.id === id)
+    if (!t || !!t.auto === on) return
+    if (this.guard && !this.guard()) return
+    t.auto = on
+    this.onTray?.(t, false)
+    this.invalidate()
+    this.autoSort({ into: t })
+  }
+
+  // The screen rectangle of a tray's auto sort switch, at its top right corner: [x0, y0, x1, y1].
+  trayBadge(t) {
+    const { cam, vw, vh } = this
+    const tag = Math.max(14, this.geo.S * 0.4 * cam.z)
+    const gap = tag * 0.3
+    const w = tag
+    const x1 = (t.x + t.w - cam.x) * cam.z + vw / 2 - gap
+    const y0 = (t.y - cam.y) * cam.z + vh / 2 + gap
+    return { rect: [x1 - w, y0, x1, y0 + tag], tag }
+  }
+
+  // The tray whose auto sort switch is at a screen point, if any.
+  badgeAt(sx, sy) {
+    for (let k = this.trays.length - 1; k >= 0; k--) {
+      const t = this.trays[k]
+      const [x0, y0, x1, y1] = this.trayBadge(t).rect
+      if (sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1) return t
+    }
+    return null
   }
 
   // A number key with pieces selected: lays them out in a grid in the tray with that number, next to
@@ -2235,8 +2727,9 @@ export class Engine {
       this.y[i] = y0[i]
     }
     this.toTop(new Set(ids))
-    this.placeInTrays(ids, 0, 0, t)
+    const change = this.placeInTrays(ids, 0, 0, t)
     this.commit(changed)
+    this.autoSort(change)
   }
 
   // After pieces were turned or sorted: the trays they're in fit themselves around them again.
@@ -2431,6 +2924,20 @@ export class Engine {
       } else again = true
     }
 
+    for (const [id, to] of this.trayTo) {
+      const t = this.trays.find((x) => x.id === id)
+      if (!t || this.carry?.trays.some((c) => c.id === id)) {
+        this.trayTo.delete(id)
+        continue
+      }
+      const f = ease(dt, 40)
+      for (const k of ['x', 'y', 'w', 'h']) t[k] += (to[k] - t[k]) * f
+      if (Math.abs(to.x - t.x) + Math.abs(to.y - t.y) + Math.abs(to.w - t.w) + Math.abs(to.h - t.h) < 0.05) {
+        Object.assign(t, to)
+        this.trayTo.delete(id)
+      } else again = true
+    }
+
     if (this.pops.length) again = true
 
     this.draw()
@@ -2511,12 +3018,22 @@ export class Engine {
     this.gn = 0
     const lifted = this.lift?.set
     const rlifted = this.rlift.size ? new Set([...this.rlift.values()].flatMap((rl) => rl.ids)) : null
+    // Trays lie above the pieces on the table, and the pieces in them above the trays.
+    const inTray = this.trays.length ? new Set(this.trays.flatMap((t) => t.pieces)) : null
     for (const i of this.order) {
-      if (lifted?.has(i) || rlifted?.has(i)) continue
+      if (lifted?.has(i) || rlifted?.has(i) || inTray?.has(i)) continue
       this.poseInto(i)
       if (seen(this.qx, this.qy, R)) this.gpuPiece(i, this.qx, this.qy, this.qa, 1, v)
     }
     const still = [0, this.gn]
+    if (inTray) {
+      for (const i of this.order) {
+        if (lifted?.has(i) || rlifted?.has(i) || !inTray.has(i)) continue
+        this.poseInto(i)
+        if (seen(this.qx, this.qy, R)) this.gpuPiece(i, this.qx, this.qy, this.qa, 1, v)
+      }
+    }
+    const trayed = [still[1], this.gn - still[1]]
     const lift = [this.gn, 0]
     if (this.lift) {
       this.liftPoses((i, x, y, a, s) => {
@@ -2585,7 +3102,7 @@ export class Engine {
       trays: { data: this.gTrays, count: trays },
       refs: { data: this.gRefs, count: refs },
       pieces: { data: this.gi, count: this.gn },
-      seg: { still, lift, sel, hl },
+      seg: { still, trayed, lift, sel, hl },
       selBox,
       hlBox,
       extra,
@@ -2651,28 +3168,6 @@ export class Engine {
   // Screen-space overlays: the selection box and the selected reference image's handles.
   drawChrome() {
     const { ctx, dpr, cam, vw, vh } = this
-    // Tray numbers, in a tag in the tray's colour at its top left corner. It scales with the zoom
-    // like everything on the table, but never gets too small to read.
-    const tag = Math.max(14, this.geo.S * 0.4 * cam.z)
-    const gap = tag * 0.3
-    for (const t of this.trays) {
-      if (!t.num) continue
-      const x = (t.x - cam.x) * cam.z + vw / 2
-      const y = (t.y - cam.y) * cam.z + vh / 2
-      if (x > vw || y > vh || x + t.w * cam.z < 0 || y + t.h * cam.z < 0) continue
-      this.dirty = true
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      ctx.beginPath()
-      ctx.roundRect(x + gap, y + gap, tag, tag, tag * 0.3)
-      ctx.fillStyle = TRAY_COLORS[t.color] || TRAY_COLORS.gray
-      ctx.fill()
-      ctx.fillStyle = '#fff'
-      ctx.font = `700 ${Math.round(tag * 0.6)}px system-ui, -apple-system, sans-serif`
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      ctx.fillText(String(t.num), x + gap + tag / 2, y + gap + tag / 2 + tag * 0.03)
-      ctx.textAlign = 'start'
-    }
     const sel = this.refSel && this.refs.find((r) => r.id === this.refSel)
     if (sel) {
       this.dirty = true
@@ -2754,6 +3249,63 @@ export class Engine {
     ctx.shadowColor = 'transparent'
   }
 
+  // Tray numbers, in a tag in the tray's colour at its top left corner, above the notes and trays.
+  // It scales with the zoom like everything on the table, but never gets too small to read.
+  drawTrayTags() {
+    const octx = this.octx
+    // Tray numbers, in a tag in the tray's colour at its top left corner. It scales with the zoom
+    // like everything on the table, but never gets too small to read.
+    const { dpr, cam, vw, vh } = this
+    const tag = Math.max(14, this.geo.S * 0.4 * cam.z)
+    const gap = tag * 0.3
+    for (const t of this.trays) {
+      if (!t.num) continue
+      const x = (t.x - cam.x) * cam.z + vw / 2
+      const y = (t.y - cam.y) * cam.z + vh / 2
+      if (x > vw || y > vh || x + t.w * cam.z < 0 || y + t.h * cam.z < 0) continue
+      octx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      octx.beginPath()
+      octx.roundRect(x + gap, y + gap, tag, tag, tag * 0.3)
+      octx.fillStyle = TRAY_COLORS[t.color] || TRAY_COLORS.gray
+      octx.fill()
+      octx.fillStyle = '#fff'
+      octx.font = `700 ${Math.round(tag * 0.6)}px system-ui, -apple-system, sans-serif`
+      octx.textAlign = 'center'
+      octx.textBaseline = 'middle'
+      octx.fillText(String(t.num), x + gap + tag / 2, y + gap + tag / 2 + tag * 0.03)
+      octx.textAlign = 'start'
+    }
+    // The auto sort switch at the top right: filled when on, an outline when off.
+    for (const t of this.trays) {
+      const [x0, y0, x1, y1] = this.trayBadge(t).rect
+      if (x0 > vw || y0 > vh || x1 < 0 || y1 < 0) continue
+      const color = TRAY_COLORS[t.color] || TRAY_COLORS.gray
+      octx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      octx.beginPath()
+      octx.roundRect(x0, y0, x1 - x0, y1 - y0, tag * 0.3)
+      if (t.auto) {
+        octx.fillStyle = color
+        octx.fill()
+      } else {
+        octx.globalAlpha = 0.7
+        octx.lineWidth = 1.25
+        octx.strokeStyle = color
+        octx.stroke()
+        octx.globalAlpha = 1
+      }
+      // A little grid of four squares: the pieces laid out.
+      octx.fillStyle = t.auto ? '#fff' : color
+      const pad = tag * 0.24
+      const gap = tag * 0.1
+      const cell = (tag - 2 * pad - gap) / 2
+      for (const [cx, cy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+        octx.beginPath()
+        octx.roundRect(x0 + pad + cx * (cell + gap), y0 + pad + cy * (cell + gap), cell, cell, cell * 0.25)
+        octx.fill()
+      }
+    }
+  }
+
   drawCursors() {
     const ctx = this.octx
     if (!ctx) return
@@ -2761,7 +3313,8 @@ export class Engine {
       ctx.setTransform(1, 0, 0, 1, 0, 0)
       ctx.clearRect(0, 0, this.overlay.width, this.overlay.height)
     }
-    this.cursorsDrawn = this.cursors.size > 0
+    this.cursorsDrawn = this.cursors.size > 0 || this.trays.length > 0
+    this.drawTrayTags()
     if (!this.cursors.size) return
     const { dpr, cam, vw, vh } = this
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)

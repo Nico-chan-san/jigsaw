@@ -184,15 +184,6 @@ export const GitHub = (p) => (
   </Svg>
 )
 
-export const Smile = (p) => (
-  <Svg {...p}>
-    <circle cx="12" cy="12" r="8.5" />
-    <path d="M8.5 14a4 4 0 0 0 7 0" />
-    <circle cx="9.3" cy="10" r=".6" fill="currentColor" />
-    <circle cx="14.7" cy="10" r=".6" fill="currentColor" />
-  </Svg>
-)
-
 export const Gear = (p) => (
   <Svg {...p}>
     <circle cx="12" cy="12" r="3" />
@@ -254,5 +245,26 @@ export const Hand = (p) => (
 export const Wrench = (p) => (
   <Svg {...p}>
     <path d="M14.7 6.3a4 4 0 0 0 5 5L21 10a5.5 5.5 0 0 1-7.4 6.6L7.5 22.7a2.1 2.1 0 0 1-3-3l6.1-6.1A5.5 5.5 0 0 1 17.2 6l-2.5 2.5z" />
+  </Svg>
+)
+
+export const Undo = (p) => (
+  <Svg {...p}>
+    <path d="M9 14 4 9l5-5" />
+    <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+  </Svg>
+)
+
+export const Redo = (p) => (
+  <Svg {...p}>
+    <path d="m15 14 5-5-5-5" />
+    <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
+  </Svg>
+)
+
+export const Share = (p) => (
+  <Svg {...p}>
+    <path d="M12 15V4M8 7.5 12 3.5l4 4" />
+    <path d="M5 12v6.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V12" />
   </Svg>
 )

@@ -1,11 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
-import { formatTime } from '../lib/time.js'
-import { User, Users } from './icons.jsx'
+import { Users } from './icons.jsx'
 
 const FLUSH_MS = 15000
-
-const fmt = formatTime
 
 // Time only accrues while this window is visible and focused, no dialog is open over the board (the
 // settings drop-down doesn't count), and the jigsaw is unfinished.
@@ -74,21 +71,6 @@ export default function Timers({ roomId, me: name, initial, busRef, stopped, onT
     }
   }, [roomId, name, busRef])
 
-  const total = Object.values(times).reduce((a, b) => a + b, 0) + pending
-  const mine = (times[name] || 0) + pending
-
-  return (
-    <>
-      <span className="stat" title="Total time, all players">
-        <Users />
-        {fmt(total)}
-      </span>
-      {name && (
-        <span className="stat" title="Your time">
-          <User />
-          {fmt(mine)}
-        </span>
-      )}
-    </>
-  )
+  // The header button is just the players icon: the times are in the players list.
+  return <Users />
 }

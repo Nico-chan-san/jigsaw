@@ -54,6 +54,8 @@ const SECTIONS = [
       [<Combo key="ss" keys={['Shift', 'Space']} />, 'Rotate them all together, around their centre'],
       [<Key key="g">G</Key>, "Sort selected pieces into a grid, or a selected tray's"],
       [<Combo key="sg" keys={['Shift', 'G']} />, 'Sort them into a grid in random order'],
+      [<Combo key="un" keys={['Ctrl', 'Z']} />, 'Undo your last move (Cmd on a Mac)'],
+      [<Combo key="re" keys={['Ctrl', 'Shift', 'Z']} />, 'Redo it'],
       [<Either key="z" keys={['+', '-']} />, 'Zoom'],
       [<Key key="c">C</Key>, 'Fit to screen'],
       [<Key key="f">F</Key>, 'Fullscreen'],

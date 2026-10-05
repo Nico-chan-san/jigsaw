@@ -2,6 +2,18 @@
 
 ## 5 October 2026
 
+- A finished jigsaw has a new share button next to the podium button. It copies a sticker to your clipboard, ready to paste: the podium from the game over the finished jigsaw, which is blurred and dimmed behind it, with a white border round it all on a see-through background. A short message tells you when it has been copied. Where the browser doesn't allow that, the picture is saved as a file instead.
+- The celebration when a jigsaw is finished is calmer: the party emojis only shoot up from the bottom corners, and no longer rain from the top.
+- When a jigsaw is finished, it turns the right way up, and all trays, images and notes are cleared away. A finished jigsaw can no longer be picked up, moved or turned.
+- Trays have an auto sort switch in their top right corner (a small grid icon), also in the right click menu. When it is on, every time pieces are put in the tray or taken out of it, everything in it is sorted into a grid, new pieces last, and pieces that fit join up. Everyone sees whether it is on.
+- Reactions are now just the celebration: the button next to view mode turns it on, and no drop-down with other emojis is left.
+- The players button moved to the top right, between help and settings, and no longer shows any times. The players list now starts with the total time.
+- When another player moves a tray with pieces in it, the tray now glides along with its pieces instead of running ahead of them.
+- Trays now lie above the pieces on the table, images and notes, so those slide under them, while the pieces inside a tray stay on top of it. Clicking on a tray over loose pieces or an image selects the tray.
+- Undo and redo your own changes with `Ctrl+Z` and `Ctrl+Shift+Z` (`⌘Z` and `⌘⇧Z` on a Mac), or the new buttons next to reactions. It covers moving, turning and sorting pieces, adding, moving, resizing and removing images, trays and notes, and what you have selected, so you can get a selection back after clearing it by accident. Things that another player has changed since, or is holding, stay as they are.
+- Right click a piece, tray, image or note to open a menu with everything you can do with it, such as turn, sort, send to a tray, remove and deselect. Each item shows its keyboard shortcut. Dragging with the right button still moves the table.
+- Other players no longer see your cursor while a dialog is open, such as sign in, help, all jigsaws or settings.
+- You can now turn selected pieces that lie in a tray.
 - The first nine trays get a number, 1 to 9, shown in the top left corner. When a tray is removed, its number goes to the next new tray. Select some pieces and press the number to move them into that tray.
 - In the new jigsaw form the image preview now spans the whole window, with the settings under it. It adjusts when you resize the window.
 - When someone turns pieces, you now see them spin into place too. Pieces other players carry also lift up with a shadow, like yours do.

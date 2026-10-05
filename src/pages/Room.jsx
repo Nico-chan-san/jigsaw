@@ -11,7 +11,11 @@ import {
   Minus,
   Picture,
   Plus,
+  Redo,
   Rooms,
+  Share,
+  Check,
+  Undo,
 } from '../components/icons.jsx'
 import Help from '../components/Help.jsx'
 import Settings from '../components/Settings.jsx'
@@ -23,7 +27,9 @@ import Celebration from '../components/Celebration.jsx'
 import DevMenu from '../components/DevMenu.jsx'
 import { useLinger } from '../lib/linger.js'
 import { NoteButton, NotesLayer } from '../components/Notes.jsx'
+import ContextMenu from '../components/ContextMenu.jsx'
 import { TrayButton } from '../components/Trays.jsx'
+import { renderShare, shareImage } from '../lib/share.js'
 import { playSnap } from '../lib/sound.js'
 import { canFullscreen, fullscreenEl, toggleFullscreen, useFullscreen, useNotch } from '../lib/fullscreen.js'
 
@@ -33,6 +39,11 @@ const KeyHint = ({ k }) => (
     {k}
   </span>
 )
+
+// Undo and redo shortcuts as the platform writes them.
+const MAC = /Mac|iPhone|iPad/.test(navigator.platform)
+const MOD = MAC ? '⌘' : 'Ctrl+'
+const REDO_KEY = MAC ? '⇧Z' : 'Y'
 
 // The controls fade away after this long without the pointer moving or a key being pressed.
 const IDLE_MS = 3000
@@ -46,10 +57,10 @@ function useIdle() {
     let timer = 0
     let over = false
     let touch = false
-    const busy = () => over || touch || document.querySelector('.modal-bg, .settings-menu, .react-menu, .float :focus-visible')
+    const busy = () => over || touch || document.querySelector('.modal-bg, .settings-menu, .float :focus-visible')
     const sleep = () => (busy() ? (timer = setTimeout(sleep, IDLE_MS)) : setIdle(true))
     const wake = (e) => {
-      if (e.type !== 'keydown') over = !!e.target?.closest?.('.float, .players, .podium-btn')
+      if (e.type !== 'keydown') over = !!e.target?.closest?.('.float, .players, .podium-btn, .share-btn')
       if (e.pointerType) touch = e.pointerType === 'touch'
       setIdle(false)
       clearTimeout(timer)
@@ -135,8 +146,13 @@ export default function Room({ id }) {
   const [gpuError, setGpuError] = useState(null)
   // View mode: dragging with the left button (or a finger) moves the table, never pieces or notes.
   const [panMode, setPanMode] = useState(() => store.get('panMode') === '1')
+  const [hist, setHist] = useState({ undo: false, redo: false })
+  const [menu, setMenu] = useState(null)
+  const closeMenu = useCallback(() => setMenu(null), [])
   const [podium, setPodium] = useState(false)
   const closePodium = useCallback(() => setPodium(false), [])
+  // After sharing: what happened, for a moment ('copied' or 'saved').
+  const [shared, setShared] = useState(null)
   const [podiumShown, podiumClosing] = useLinger(podium)
   const [party, setParty] = useState(false)
   // Bumped to play the celebration again from the start, see the dev menu.
@@ -184,6 +200,8 @@ export default function Room({ id }) {
           onTrayDelete: (trayId) => api.deleteTray(id, trayId),
           onStats: () => setStats(eng.contributors()),
           onSnap: playSnap,
+          onMenu: (x, y, kind, id) => setMenu({ x, y, kind, id }),
+          onHistory: setHist,
           onComplete: () => {
             setDone(true)
             // Celebrate once per player and jigsaw, whoever placed the last piece.
@@ -307,12 +325,22 @@ export default function Room({ id }) {
     const key = (e) => {
       if (e.key !== 'Escape' || e.repeat || !fullscreenEl()) return
       if (e.target?.closest?.('input, textarea, [contenteditable]')) return
-      if (document.querySelector('.modal-bg, .settings-menu, .react-menu, .react-pick [aria-pressed="true"]')) return
+      if (document.querySelector('.modal-bg, .settings-menu, .react-pick [aria-pressed="true"]')) return
       if (engine.drag || engine.selCount || engine.refSel) return
       toggleFullscreen()
     }
     window.addEventListener('keydown', key, true)
     return () => window.removeEventListener('keydown', key, true)
+  }, [engine])
+
+  // Other players only see our cursor while we're playing, not while a dialog is open.
+  useEffect(() => {
+    if (!engine) return
+    const check = () => engine.setAway(!!document.querySelector('.modal-bg'))
+    const mo = new MutationObserver(check)
+    mo.observe(document.body, { childList: true, subtree: true })
+    check()
+    return () => mo.disconnect()
   }, [engine])
 
   // H help, V view mode, P players, N note, T tray, I image, + and - zoom, C centres, F fullscreen. Arrow keys and WASD pan (see the engine). New notes, trays and images go under the pointer when it's on the table.
@@ -355,6 +383,14 @@ export default function Room({ id }) {
   const play = engine && (
     <>
       <div className="float">
+        <button className="icon-btn" onClick={() => engine.undo()} disabled={!hist.undo} aria-label="Undo" aria-keyshortcuts="Control+Z Meta+Z" title={`Undo (${MOD}Z)`}>
+          <Undo />
+        </button>
+        <button className="icon-btn" onClick={() => engine.redo()} disabled={!hist.redo} aria-label="Redo" aria-keyshortcuts="Control+Shift+Z Meta+Shift+Z" title={`Redo (${MOD}${REDO_KEY})`}>
+          <Redo />
+        </button>
+      </div>
+      <div className="float">
         <button
           className={`icon-btn view-btn${panMode ? ' on' : ''}`}
           onClick={() => setPanMode((v) => !v)}
@@ -369,19 +405,6 @@ export default function Room({ id }) {
         <Reactions engine={engine} busRef={reactBus} hint={<KeyHint k="R" />} />
       </div>
       <div className="float">
-        <button
-          className={`stats-btn${players ? ' on' : ''}`}
-          onClick={() => setPlayers((s) => !s)}
-          aria-pressed={players}
-          aria-keyshortcuts="P"
-          title={players ? 'Hide players (P)' : 'Show players (P)'}
-        >
-          <Timers roomId={id} me={playerId} initial={data.times} busRef={timeBus} stopped={done} onTimes={onTimes} />
-          <KeyHint k="P" />
-        </button>
-      </div>
-      <div className="float">
-        <NoteButton createRef={createNote} hint={<KeyHint k="N" />} />
         <TrayButton engine={engine} hint={<KeyHint k="T" />} />
         <button
           className="icon-btn"
@@ -393,6 +416,7 @@ export default function Room({ id }) {
           <Picture />
           <KeyHint k="I" />
         </button>
+        <NoteButton createRef={createNote} hint={<KeyHint k="N" />} />
       </div>
     </>
   )
@@ -408,6 +432,19 @@ export default function Room({ id }) {
         <HelpIcon />
         <KeyHint k="H" />
       </button>
+      {engine && (
+        <button
+          className={`icon-btn${players ? ' on' : ''}`}
+          onClick={() => setPlayers((s) => !s)}
+          aria-pressed={players}
+          aria-label="Players"
+          aria-keyshortcuts="P"
+          title={players ? 'Hide players (P)' : 'Show players (P)'}
+        >
+          <Timers roomId={id} me={playerId} initial={data.times} busRef={timeBus} stopped={done} onTimes={onTimes} />
+          <KeyHint k="P" />
+        </button>
+      )}
       <Settings privateRoom={!!data?.private} />
     </>
   )
@@ -493,6 +530,7 @@ export default function Room({ id }) {
         {full && <div className="float">{full}</div>}
       </div>
       <div className="float tr">{account}</div>
+      {menu && engine && <ContextMenu engine={engine} at={menu} onClose={closeMenu} />}
       {helpShown && <Help onClose={closeHelp} closing={helpClosing} />}
       {party && <Celebration key={partyKey} onDone={endParty} />}
       {import.meta.env.DEV && devMenu && engine && (
@@ -520,6 +558,29 @@ export default function Room({ id }) {
         <button className="podium-btn" onClick={() => setPodium(true)} aria-label="Podium" title="Top players">
           <PodiumIcon />
         </button>
+      )}
+      {engine && done && (
+        <button
+          className="share-btn"
+          onClick={async () => {
+            const picture = renderShare({
+              image: engine.refImg,
+              ranked: rankPlayers({ stats, times, notes, nameOf }),
+            })
+            const result = await shareImage(picture, engine.room?.name).catch(() => null)
+            setShared(result)
+            if (result) setTimeout(() => setShared(null), 2500)
+          }}
+          aria-label="Share"
+          title={shared === 'copied' ? 'Copied to the clipboard' : shared === 'saved' ? 'Saved as an image' : 'Copy a picture of the finished jigsaw and the podium'}
+        >
+          {shared ? <Check /> : <Share />}
+        </button>
+      )}
+      {shared && (
+        <div className="toast" role="status" key={shared + Date.now()}>
+          {shared === 'copied' ? 'Image copied to the clipboard' : 'Image saved'}
+        </div>
       )}
       {podiumShown && (
         <Podium
