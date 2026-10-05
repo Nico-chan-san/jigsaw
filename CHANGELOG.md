@@ -3,6 +3,7 @@
 ## 5 October 2026
 
 - In the new jigsaw form the image preview now spans the whole window, with the settings under it. It adjusts when you resize the window.
+- **Classic** pieces now look more like a real jigsaw: gently crooked rows of pieces, and smooth round tabs that are each a little different in place, size and tilt. Jigsaws you've already started get the new pieces too; everything still fits together.
 
 ## 4 October 2026
 

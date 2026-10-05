@@ -20,7 +20,7 @@ export const TAB_REACH = 0.4
 
 // Shapes whose inner corners are moved off the grid, by up to this much (in units of the short
 // side), so every piece has its own size and its edges their own lengths and angles.
-const WARP = { wobbly: 0.1, mixed: 0.1, jagged: 0.14 }
+const WARP = { classic: 0.05, wobbly: 0.1, mixed: 0.1, jagged: 0.14 }
 
 // How far a piece can reach past the middle of its grid cell's edges, in units of the short side.
 export const reachFor = (shape) => TAB_REACH + (WARP[shape] || 0)
@@ -96,32 +96,49 @@ const wobblyKnob = (r) =>
     c: j(r, 0.03),
   })
 
+// A tab like on a jigsaw from a good maker: the classic smooth S from the edge into the neck and a
+// round head, set a little off the middle, leaning a little and a little lopsided, on an edge that
+// stays calm around it and bows a little on its own. Sizes are in units of the short side, whatever
+// the edge's length (len, also in units of the short side), so a tab on a long edge isn't stretched.
+function classic(r, len = 1) {
+  const m = len / 2 + j(r, Math.min(0.15, 0.09 + 0.3 * Math.max(0, len - 1)))
+  const t = 0.1 * (0.92 + r() * 0.16)
+  // Half the neck's width, the head's half widths (left, right) and heights (left, right), and lean.
+  const n = t * (0.85 + r() * 0.2)
+  const wl = 2 * t * (0.92 + r() * 0.16)
+  const wr = wl * (0.9 + r() * 0.2)
+  const hl = 3 * t * (0.92 + r() * 0.16)
+  const hr = hl * (0.94 + r() * 0.12)
+  const lean = j(r, 0.035)
+  // The edge lifts a little before the tab and after it, and the tab with it.
+  const a = j(r, 0.02)
+  const e = j(r, 0.02)
+  const c = j(r, 0.01)
+  const bow = j(r, 0.012)
+  const p = [
+    [0, 0],
+    [m * 0.4, a],
+    [m, -t + c],
+    [m - n, t + c],
+    [m - wl + lean, hl + c],
+    [m + wr + lean, hr + c],
+    [m + n, t + c],
+    [m, -t + c],
+    [len - (len - m) * 0.4, e],
+    [len, 0],
+  ]
+  const out = [p[0]]
+  cubic(out, p[0], p[1], p[2], p[3], 12)
+  cubic(out, p[3], p[4], p[5], p[6], 18)
+  cubic(out, p[6], p[7], p[8], p[9], 12)
+  return out.map(([x, v]) => {
+    const u = x / len
+    return [u, v + bow * Math.sin(Math.PI * u)]
+  })
+}
+
 const profiles = {
-  classic(r) {
-    const t = 0.1
-    const a = j(r, 0.04)
-    const b = j(r, 0.04)
-    const c = j(r, 0.03)
-    const d = j(r, 0.03)
-    const e = j(r, 0.04)
-    const p = [
-      [0, 0],
-      [0.2, a],
-      [0.5 + b + d, -t + c],
-      [0.5 - t + b, t + c],
-      [0.5 - 2 * t + b - d, 3 * t + c],
-      [0.5 + 2 * t + b - d, 3 * t + c],
-      [0.5 + t + b, t + c],
-      [0.5 + b + d, -t + c],
-      [0.8, e],
-      [1, 0],
-    ]
-    const out = [p[0]]
-    cubic(out, p[0], p[1], p[2], p[3], 10)
-    cubic(out, p[3], p[4], p[5], p[6], 14)
-    cubic(out, p[6], p[7], p[8], p[9], 10)
-    return out
-  },
+  classic,
   round(r) {
     const cu = 0.5 + j(r, 0.05)
     const c = 0.1
@@ -335,11 +352,12 @@ export function buildPuzzle({ cols, rows, width, height, shape, seed, longPieces
     }
   }
   // An edge from corner A to corner B along a profile, its tabs pushed out along normal (nx, ny).
+  // The profile gets the edge's length in units of the short side; most ignore it.
   const edge = (A, B, nx, ny) => {
     const sign = r() < 0.5 ? -1 : 1
     const ex = B[0] - A[0]
     const ey = B[1] - A[1]
-    return profile(r).map(([u, v]) => [A[0] + u * ex + v * S * sign * nx, A[1] + u * ey + v * S * sign * ny])
+    return profile(r, Math.hypot(ex, ey) / S).map(([u, v]) => [A[0] + u * ex + v * S * sign * nx, A[1] + u * ey + v * S * sign * ny])
   }
   const dir = (A, B) => {
     const l = Math.hypot(B[0] - A[0], B[1] - A[1])
@@ -572,14 +590,15 @@ export function scatter(room, seed = room.seed) {
   return out
 }
 
-// The jigsaw the warped shapes' sample pieces come from: its middle piece has two tabs and two holes.
-const SAMPLE_SEED = 15
+// The jigsaw the warped shapes' sample pieces come from, by shape: its middle piece has two tabs and
+// two holes.
+const SAMPLE_SEED = { classic: 65 }
 
 // SVG path for a single sample piece (used by the shape picker icon).
 export function samplePiecePath(shape, size = 100) {
   // Warped shapes show the middle piece of a small jigsaw, crooked corners and all.
   if (WARP[shape]) {
-    const geo = buildPuzzle({ cols: 3, rows: 3, width: size * 3, height: size * 3, shape, seed: SAMPLE_SEED })
+    const geo = buildPuzzle({ cols: 3, rows: 3, width: size * 3, height: size * 3, shape, seed: SAMPLE_SEED[shape] ?? 15 })
     const o = geo.pieces[4].outline
     const pts = []
     for (let k = 0; k < o.length; k += 2) pts.push(`${(o[k] + size / 2).toFixed(2)} ${(o[k + 1] + size / 2).toFixed(2)}`)
