@@ -1,5 +1,9 @@
 # Changelog
 
+## 5 October 2026
+
+- In the new jigsaw form the image preview now spans the whole window, with the settings under it. It adjusts when you resize the window.
+
 ## 4 October 2026
 
 - Hardcore mode is gone. Jigsaws that were made with it now have every piece face up.

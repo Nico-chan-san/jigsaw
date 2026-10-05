@@ -153,12 +153,12 @@ function ShapePicker({ value, onChange }) {
   )
 }
 
+// The image with the cuts drawn over it, as wide as its box but at most 70% of the window's height
+// (a tall image is centred in the box). Drawn again when the box or the window changes size.
 function Preview({ img, cols, rows, shape, seed, longPieces }) {
   const ref = useRef(null)
-  useEffect(() => {
-    const c = ref.current
-    const box = c.parentElement.getBoundingClientRect()
-    const k = Math.min(box.width / img.naturalWidth, 480 / img.naturalHeight)
+  const paint = (c, width, height) => {
+    const k = Math.min(width / img.naturalWidth, height / img.naturalHeight)
     const w = Math.round(img.naturalWidth * k)
     const h = Math.round(img.naturalHeight * k)
     const dpr = window.devicePixelRatio || 1
@@ -182,12 +182,32 @@ function Preview({ img, cols, rows, shape, seed, longPieces }) {
       ctx.strokeStyle = 'rgba(255,255,255,.35)'
       ctx.stroke(path)
     }
+  }
+  useEffect(() => {
+    const c = ref.current
+    const box = c.parentElement
+    let size = ''
+    const draw = () => {
+      const width = box.clientWidth
+      const height = Math.max(240, Math.round(window.innerHeight * 0.7))
+      if (!width || `${width}x${height}` === size) return
+      size = `${width}x${height}`
+      paint(c, width, height)
+    }
+    const watch = new ResizeObserver(draw)
+    watch.observe(box)
+    window.addEventListener('resize', draw)
+    draw()
+    return () => {
+      watch.disconnect()
+      window.removeEventListener('resize', draw)
+    }
   }, [img, cols, rows, shape, seed, longPieces])
   return <canvas ref={ref} />
 }
 
-// The new jigsaw form, shown inside the jigsaws window: the image on the left, its settings on the
-// right, and the Create button in the window's bar (where New jigsaw was).
+// The new jigsaw form, shown inside the jigsaws window: the image at the top, its settings under
+// it, and the Create button in the window's bar (where New jigsaw was).
 export default function NewRoom({ bar }) {
   const { requireName, currentPlayer, openRoom } = useApp()
   const [img, setImg] = useState(null)

@@ -301,27 +301,17 @@ button {
 .sheet .dialog-body {
   padding-bottom: 12px;
 }
-/* The image on the left, staying in view while the settings on the right scroll. */
+/* The image across the whole window, the settings under it. */
 .sheet .create {
+  width: 100%;
   margin-top: 0;
   padding-bottom: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-  align-items: start;
-  gap: 32px;
+  gap: 28px;
   max-width: none;
-}
-.sheet .create-media {
-  position: sticky;
-  top: 0;
 }
 @media (max-width: 760px) {
   .sheet .create {
-    grid-template-columns: minmax(0, 1fr);
     gap: 20px;
-  }
-  .sheet .create-media {
-    position: static;
   }
 }
 /* Under the title: the tabs in the middle, New jigsaw (or Create jigsaw) on the right. */
