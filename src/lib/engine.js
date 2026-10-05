@@ -2194,27 +2194,24 @@ export class Engine {
     const gh = gy1 - gy0
     const moved = this.withGroups(ids)
     const rest = t.pieces.filter((i) => !moved.has(i))
-    // Where the grid's top left corner goes: the middle of an empty tray, else beside what's in it, on
-    // the side that makes the tray grow the least.
+    // Where the grid's top left corner goes: the middle of an empty tray, else beside what's in it.
+    // The tray grows along its shorter side, so a wide one gets the grid above or below it and a
+    // tall one to its left or right, on whichever side the pieces came from.
     let left = t.x + t.w / 2 - gw / 2
     let top = t.y + t.h / 2 - gh / 2
     if (rest.length) {
       const b = this.bbox(rest, this.packExtent)
-      const mx = (b.x0 + b.x1) / 2 - gw / 2
-      const my = (b.y0 + b.y1) / 2 - gh / 2
-      let best = Infinity
-      for (const [x, y] of [
-        [b.x1, my],
-        [b.x0 - gw, my],
-        [mx, b.y1],
-        [mx, b.y0 - gh],
-      ]) {
-        const area = (Math.max(b.x1, x + gw) - Math.min(b.x0, x)) * (Math.max(b.y1, y + gh) - Math.min(b.y0, y))
-        if (area < best) {
-          best = area
-          left = x
-          top = y
-        }
+      const from = this.bbox(ids, 0)
+      const fx = (from.x0 + from.x1) / 2
+      const fy = (from.y0 + from.y1) / 2
+      const mx = (b.x0 + b.x1) / 2
+      const my = (b.y0 + b.y1) / 2
+      if (b.x1 - b.x0 >= b.y1 - b.y0) {
+        left = mx - gw / 2
+        top = fy < my ? b.y0 - gh : b.y1
+      } else {
+        top = my - gh / 2
+        left = fx < mx ? b.x0 - gw : b.x1
       }
     }
     left -= gx0
