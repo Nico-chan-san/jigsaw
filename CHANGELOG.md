@@ -2,6 +2,8 @@
 
 ## 6 October 2026
 
+- New spectator mode, in the settings menu: watch the jigsaw like a TV broadcast. Every player who is at the table gets their own screen, following their cursor and the area around it, with rounded corners and a shadow. Three players give two screens on top and one below in the middle, and the screens slide around when players join or leave. Only the all jigsaws and settings buttons are left on screen.
+- When a player matches a piece in spectator mode, their screen grows to fill the window, replays the move in slow motion, and celebrates with confetti before the screens slide back.
 - Every other line in the help is now shaded, so it is easier to read across from a key to what it does.
 - The help no longer has a "Got it" button. Close it with the cross, `H`, `Esc` or by clicking outside.
 - Select all (`Ctrl+A` or `Cmd+A`) no longer picks up the pieces that are in trays.

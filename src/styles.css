@@ -2232,3 +2232,164 @@ button.link:hover {
     opacity: 0;
   }
 }
+
+/* ---- spectator mode (see lib/spectate.js) ---- */
+
+.icon-btn[hidden] {
+  display: none;
+}
+/* The table is drawn in the screens instead; its canvases keep working underneath. */
+.room.spectating canvas.board,
+.room.spectating canvas.gpu,
+.room.spectating canvas.cursors,
+.room.spectating .tip {
+  visibility: hidden;
+}
+.spectate {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  overflow: hidden;
+  background: var(--canvas);
+}
+/* One player's screen: placed, sized and faded by the spectator every frame. */
+.spec-tile {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 3px solid var(--c, var(--line-strong));
+  border-radius: 34px;
+  background: var(--canvas);
+  /* The shadow of a piece held in the air (see drawGpu() in engine.js). */
+  box-shadow: 8px 18px 30px var(--shadow);
+  will-change: transform, opacity;
+  transition:
+    filter 0.45s ease,
+    border-radius 0.45s ease;
+}
+.spec-tile.focus {
+  border-radius: 40px;
+  box-shadow:
+    0 0 0 3px var(--c, var(--fg)),
+    8px 18px 30px var(--shadow);
+}
+.spec-tile.dim {
+  filter: brightness(0.6) saturate(0.7);
+}
+.spec-tile canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+.spec-name {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: calc(100% - 20px);
+  padding: 5px 11px 5px 9px;
+  border-radius: 999px;
+  background: var(--panel);
+  box-shadow: 0 2px 8px var(--shadow);
+  font-size: 13px;
+  font-weight: 600;
+}
+.spec-name[hidden] {
+  display: none;
+}
+.spec-name i {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.spec-name span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.spec-tile.dim .spec-name {
+  display: none;
+}
+.spec-vignette {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.45) 100%);
+  transition: opacity 0.5s ease;
+}
+.spec-tile.focus .spec-vignette {
+  opacity: 1;
+}
+.spec-flash {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  background: #fff;
+}
+.spec-badge {
+  position: absolute;
+  left: 50%;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: var(--panel);
+  box-shadow: 0 6px 20px var(--shadow);
+  font-weight: 700;
+  white-space: nowrap;
+  transform: translate(-50%, 0);
+}
+.spec-badge.replay,
+.spec-badge.win,
+.spec-badge.wait {
+  display: flex;
+}
+.spec-badge.replay {
+  top: 14px;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.spec-badge.replay::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #e5484d;
+  animation: spec-rec 1s ease-in-out infinite;
+}
+.spec-badge.win {
+  bottom: 22px;
+  padding: 12px 26px;
+  background: var(--c, var(--fg));
+  color: #fff;
+  font-size: clamp(16px, 2.6vw, 30px);
+}
+.spec-badge.wait {
+  top: 50%;
+  padding: 12px 24px;
+  font-size: 15px;
+  transform: translate(-50%, -50%);
+}
+@keyframes spec-rec {
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spec-badge.replay::before {
+    animation: none;
+  }
+}
