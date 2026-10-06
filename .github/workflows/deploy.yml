@@ -1,0 +1,30 @@
+name: deploy
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script_stop: true
+          script: |
+            cd /home/marcus/apps/jigsaw
+            git pull
+            npm i
+
+            TARGET=$(tmux list-windows -a -F '#{session_name}:#{window_name}' | grep ':jigsaw$' | head -1)
+            if [ -z "$TARGET" ]; then
+              echo "tmux window 'jigsaw' not found"
+              exit 1
+            fi
+
+            tmux send-keys -t "$TARGET" C-c
+            sleep 1
+            tmux send-keys -t "$TARGET" "cd /home/marcus/apps/jigsaw && __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=jigsaw.marnil.dev npm run start -- --port 13373" Enter
