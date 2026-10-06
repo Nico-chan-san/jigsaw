@@ -1,5 +1,10 @@
 # Changelog
 
+## 6 October 2026
+
+- On touch screens, pieces you pick up now ride above your finger so you can see them, and they land where they are shown.
+- The help now only shows the controls that fit your device: touch gestures on phones and tablets, mouse and keyboard on computers.
+
 ## 5 October 2026
 
 - A finished jigsaw has a new share button next to the podium button. It copies a sticker to your clipboard, ready to paste: the podium from the game over the finished jigsaw, which is blurred and dimmed behind it, with a white border round it all on a see-through background. A short message tells you when it has been copied. Where the browser doesn't allow that, the picture is saved as a file instead.

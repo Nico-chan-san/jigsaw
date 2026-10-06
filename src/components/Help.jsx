@@ -83,6 +83,9 @@ const SECTIONS = [
   },
 ]
 
+// Touch screens get the touch gestures, everything else the mouse and keyboard ones.
+const TOUCH = window.matchMedia('(hover: none)').matches
+
 export default function Help({ onClose, closing }) {
   return (
     <Dialog
@@ -97,7 +100,7 @@ export default function Help({ onClose, closing }) {
         </button>
       }
     >
-      {SECTIONS.map((s) => (
+      {SECTIONS.filter((s) => (s.title === 'Touch') === TOUCH).map((s) => (
         <section key={s.title} className={`help-${s.title.toLowerCase()}`}>
           <h2 className="label">{s.title}</h2>
           <dl>

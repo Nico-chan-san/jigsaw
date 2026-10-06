@@ -19,6 +19,8 @@ const LIVE_MS = 33
 const POP_MS = 520
 const POP_DELAY = 80
 const MAX_POPS = 12
+// Pieces held with a finger ride this far (screen px) above it, so the finger doesn't hide them.
+const TOUCH_LIFT = 72
 const calm = window.matchMedia?.('(prefers-reduced-motion: reduce)')
 // The size of an empty tray, in piece sizes.
 const TRAY_W = 6
@@ -274,6 +276,7 @@ export class Engine {
     this.lift = null
     this.pan = null
     this.pointers = new Map()
+    this.touches = new Set()
     // Pan keys held down right now.
     this.panKeys = new Set()
     // When the pan keys were first pressed, for speeding up while held.
@@ -897,6 +900,8 @@ export class Engine {
     this.canvas.setPointerCapture(e.pointerId)
     this.pointers.set(e.pointerId, [sx, sy])
     this.inPress = true
+    if (e.pointerType === 'touch') this.touches.add(e.pointerId)
+    else this.touches.delete(e.pointerId)
     this.camAnim = null
 
     if (this.drag) {
@@ -1098,6 +1103,7 @@ export class Engine {
 
   onUp(e) {
     this.pointers.delete(e.pointerId)
+    this.touches.delete(e.pointerId)
     if (this.drag && e.pointerId === this.drag.pointer) {
       const d = this.drag
       this.drop()
@@ -1297,6 +1303,7 @@ export class Engine {
       ids,
       set,
       pointer,
+      touch: this.touches.has(pointer),
       sx,
       sy,
       px: wx,
@@ -1336,7 +1343,9 @@ export class Engine {
 
   updatePivot() {
     const d = this.drag
-    const [wx, wy] = this.toWorld(d.sx, d.sy)
+    // A finger holds the pieces above itself, easing up as they lift.
+    const up = d.touch && this.lift ? (TOUCH_LIFT * this.lift.value) : 0
+    const [wx, wy] = this.toWorld(d.sx, d.sy - up)
     const { x0, y0, x1, y1 } = this.bounds
     d.px = Math.min(x1, Math.max(x0, wx))
     d.py = Math.min(y1, Math.max(y0, wy))
@@ -2870,6 +2879,10 @@ export class Engine {
         l.value = l.target
         if (!l.target) this.lift = null
       } else again = true
+      if (this.drag?.touch && this.lift === l) {
+        this.updatePivot()
+        this.sendLive()
+      }
     }
 
     for (const [id, rl] of this.rlift) {

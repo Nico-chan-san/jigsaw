@@ -1524,7 +1524,7 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   color: inherit;
 }
 
-/* Two columns: mouse and touch on the left, the longer keyboard list on the right. */
+/* Two columns: mouse on the left, the longer keyboard list on the right. */
 .help-body {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1535,6 +1535,9 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.help-body .help-touch {
+  grid-column: 1 / -1;
 }
 .help-body .help-keyboard {
   grid-column: 2;
