@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 const KIND = 'party'
-const EMOJI = '🎉'
+const EMOJI = '👍'
 
 // While the pointer is held down, this many reactions are thrown every TICK_MS.
 const TICK_MS = 60

@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import Dialog from './Dialog.jsx'
 
 const Key = ({ children }) => <kbd className="key">{children}</kbd>
@@ -23,6 +24,15 @@ const Either = ({ keys }) =>
     </span>
   ))
 
+// A range of keys, shown as 1 - 9.
+const Range = ({ from, to }) => (
+  <span className="key-group">
+    <Key>{from}</Key>
+    <span className="key-sep">-</span>
+    <Key>{to}</Key>
+  </span>
+)
+
 const SECTIONS = [
   {
     title: 'Mouse',
@@ -33,7 +43,7 @@ const SECTIONS = [
       [<Key key="tr">Drag a tray</Key>, 'Move it, with the pieces in it'],
       [<Key key="tc">Click a tray</Key>, 'Select it: space, G and Delete then work on it'],
       [<Key key="nc">Double click a note</Key>, 'Write in it (a single click selects it)'],
-      [<Key key="r">Right drag</Key>, 'Pan'],
+      [<Key key="r">Right drag</Key>, 'Pan the screen'],
       [<Key key="rc">Right click while dragging</Key>, 'Rotate held pieces'],
       [<Key key="w">Scroll</Key>, 'Zoom'],
     ],
@@ -42,13 +52,21 @@ const SECTIONS = [
     title: 'Keyboard',
     rows: [
       [
-        <>
-          <Key>W</Key>
-          <Key>A</Key>
-          <Key>S</Key>
-          <Key>D</Key>
-        </>,
-        'Pan (arrow keys too), faster the longer you hold',
+        <span key="pan" className="key-stack">
+          <span className="key-group">
+            <Key>W</Key>
+            <Key>A</Key>
+            <Key>S</Key>
+            <Key>D</Key>
+          </span>
+          <span className="key-group">
+            <Key>↑</Key>
+            <Key>←</Key>
+            <Key>↓</Key>
+            <Key>→</Key>
+          </span>
+        </span>,
+        'Pan the screen',
       ],
       [<Key key="sp">Space</Key>, "Rotate held or selected pieces, or a selected tray's"],
       [<Combo key="ss" keys={['Shift', 'Space']} />, 'Rotate them all together, around their centre'],
@@ -56,21 +74,21 @@ const SECTIONS = [
       [<Combo key="sg" keys={['Shift', 'G']} />, 'Sort them into a grid in random order'],
       [<Combo key="un" keys={['Ctrl', 'Z']} />, 'Undo your last move (Cmd on a Mac)'],
       [<Combo key="re" keys={['Ctrl', 'Shift', 'Z']} />, 'Redo it'],
-      [<Either key="z" keys={['+', '-']} />, 'Zoom'],
-      [<Key key="c">C</Key>, 'Fit to screen'],
-      [<Key key="f">F</Key>, 'Fullscreen'],
-      [<Key key="h">H</Key>, 'This help'],
-      [<Key key="v">V</Key>, 'View mode: dragging only moves the table'],
-      [<Key key="p">P</Key>, 'Players'],
-      [<Key key="n">N</Key>, 'New note'],
-      [<Key key="t">T</Key>, 'New tray, to sort pieces into (around the selected pieces, if any)'],
-      [<Key key="tn">1 to 9</Key>, 'Move selected pieces to the tray with that number'],
-      [<Key key="i">I</Key>, 'New image'],
-      [<Key key="r">R</Key>, 'Reactions'],
+      [<Range key="tn" from="1" to="9" />, 'Move selected pieces to the tray with that number'],
       [<Key key="sh">Shift</Key>, 'Add to selection'],
       [<Combo key="sa" keys={[MOD, 'A']} />, 'Select everything'],
       [<Key key="e">Esc</Key>, 'Clear selection'],
       [<Either key="del" keys={['Delete', 'Backspace']} />, 'Remove selected notes, images and tray'],
+      [<Key key="v">V</Key>, 'View mode: dragging only moves the table'],
+      [<Key key="r">R</Key>, 'Reactions'],
+      [<Key key="t">T</Key>, 'New tray, to sort pieces into (around the selected pieces, if any)'],
+      [<Key key="i">I</Key>, 'New image'],
+      [<Key key="n">N</Key>, 'New note'],
+      [<Key key="h">H</Key>, 'This help'],
+      [<Key key="p">P</Key>, 'Players'],
+      [<Either key="z" keys={['+', '-']} />, 'Zoom'],
+      [<Key key="c">C</Key>, 'Fit to screen'],
+      [<Key key="f">F</Key>, 'Fullscreen'],
     ],
   },
   {
@@ -87,6 +105,19 @@ const SECTIONS = [
 const TOUCH = window.matchMedia('(hover: none)').matches
 
 export default function Help({ onClose, closing }) {
+  // H opens the help (see Room.jsx) and closes it again.
+  useEffect(() => {
+    if (closing) return
+    const key = (e) => {
+      if (e.key.toLowerCase() !== 'h' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
+      if (e.target?.closest?.('input, textarea, [contenteditable]')) return
+      e.preventDefault()
+      onClose()
+    }
+    window.addEventListener('keydown', key)
+    return () => window.removeEventListener('keydown', key)
+  }, [onClose, closing])
+
   return (
     <Dialog
       title="How to play"
@@ -94,11 +125,6 @@ export default function Help({ onClose, closing }) {
       bodyClass="help-body"
       onClose={onClose}
       closing={closing}
-      footer={
-        <button className="primary wide" onClick={onClose}>
-          Got it
-        </button>
-      }
     >
       {SECTIONS.filter((s) => (s.title === 'Touch') === TOUCH).map((s) => (
         <section key={s.title} className={`help-${s.title.toLowerCase()}`}>

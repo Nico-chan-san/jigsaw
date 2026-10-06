@@ -2,6 +2,11 @@
 
 ## 6 October 2026
 
+- Every other line in the help is now shaded, so it is easier to read across from a key to what it does.
+- The help no longer has a "Got it" button. Close it with the cross, `H`, `Esc` or by clicking outside.
+- Select all (`Ctrl+A` or `Cmd+A`) no longer picks up the pieces that are in trays.
+- The reaction you throw with `R` is now a thumbs up instead of a party popper.
+- The settings menu now opens on top of the players list instead of behind it.
 - On touch screens, pieces you pick up now ride above your finger so you can see them, and they land where they are shown.
 - The help now only shows the controls that fit your device: touch gestures on phones and tablets, mouse and keyboard on computers.
 

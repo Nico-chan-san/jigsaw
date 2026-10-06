@@ -673,8 +673,10 @@ export class Engine {
     return this.sel.size + this.selRefs.size + this.selNotes.size
   }
 
+  // Everything except the pieces lying in trays.
   selectAll() {
-    const pieces = new Set(Array.from({ length: this.n }, (_, i) => i))
+    const inTray = new Set(this.trays.flatMap((t) => t.pieces))
+    const pieces = new Set(Array.from({ length: this.n }, (_, i) => i).filter((i) => !inTray.has(i)))
     const refs = new Set(this.refs.map((r) => r.id))
     const notes = new Set((this.notes?.get() || []).map((n) => n.id))
     this.selectRef(null)

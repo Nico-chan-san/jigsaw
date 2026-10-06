@@ -1548,16 +1548,31 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: baseline;
-  gap: 8px 12px;
   margin: 0;
 }
+/* Every other row is shaded; the rows share the section's columns so keys still line up. */
 .help-row {
-  display: contents;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  column-gap: 12px;
+  padding: 5px 8px;
+  border-radius: 6px;
+}
+.help-row:nth-child(odd) {
+  background: var(--hover);
 }
 .help-row dt {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  gap: 4px;
+}
+.key-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 4px;
 }
 .key-group {
@@ -1623,6 +1638,9 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 .settings {
   position: relative;
   display: inline-flex;
+}
+.float:has(.settings-menu) {
+  z-index: 6;
 }
 .settings-menu {
   position: absolute;
