@@ -72,7 +72,7 @@ export default function ContextMenu({ engine, at, onClose }) {
         ? [...turn, { label: 'Auto sort', keys: tray?.auto ? 'On' : 'Off', run: () => engine.setTrayAuto(at.id, !tray?.auto) }, remove('Remove tray')]
         : at.kind === 'ref'
           ? [remove('Remove image')]
-          : [remove('Remove note')]
+          : [{ label: 'Edit note', keys: 'Double click', run: () => requestAnimationFrame(() => engine.notes?.edit(at.id)) }, remove('Remove note')]
 
   // Keep the menu on screen.
   useLayoutEffect(() => {

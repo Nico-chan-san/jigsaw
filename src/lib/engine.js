@@ -106,8 +106,10 @@ const pm = ([r, g, b, a], alpha = 1) => [r * a * alpha, g * a * alpha, b * a * a
 // a, or a bigger array if it holds fewer than n numbers.
 const grow = (a, n) => (a.length >= n ? a : new Float32Array(Math.max(n, a.length * 2)))
 // Arrow keys and WASD move the camera, at this many screen pixels per second, speeding up the
-// longer they are held: up to PAN_BOOST times as fast after PAN_RAMP ms.
+// longer they are held: up to PAN_BOOST times as fast after PAN_RAMP ms. Holding a piece, tray,
+// image or note within EDGE_PX of the view's edge moves it the same way.
 const PAN_SPEED = 900
+const EDGE_PX = 40
 const PAN_BOOST = 3.5
 const PAN_RAMP = 1500
 const PAN_KEYS = {
@@ -791,6 +793,17 @@ export class Engine {
     this.invalidate()
   }
 
+  // A press on a note on its own: it moves alone, and a click without moving selects it.
+  grabNote(e, id) {
+    const n = this.notes?.get().find((x) => x.id === id)
+    if (!n) return
+    const [sx, sy] = this.pos(e)
+    const [wx, wy] = this.toWorld(sx, sy)
+    this.canvas.setPointerCapture(e.pointerId)
+    this.pointers.set(e.pointerId, [sx, sy])
+    this.carry = { pointer: e.pointerId, wx, wy, sx0: sx, sy0: sy, moved: false, note: id, refs: [], notes: [{ id, x: n.x, y: n.y }], trays: [] }
+  }
+
   carryAt(wx, wy, c = this.carry) {
     const dx = wx - c.wx
     const dy = wy - c.wy
@@ -1145,7 +1158,7 @@ export class Engine {
         }
       }
       if (!this.drag) {
-        this.moveCarry(...this.toWorld(sx, sy))
+        if (c.moved) this.moveCarry(...this.toWorld(sx, sy))
         return
       }
     }
@@ -2645,6 +2658,7 @@ export class Engine {
   moveRef(wx, wy) {
     const d = this.refDrag
     const ref = d.ref
+    d.moved = true
     if (d.mode === 'move') {
       ref.x = wx + d.dx
       ref.y = wy + d.dy
@@ -3019,6 +3033,32 @@ export class Engine {
     this.invalidate()
   }
 
+  // Which way the table moves while something is held near the edge of the view: -1, 0 or 1 on each
+  // axis. Only once it has been moved, so pressing on something near the edge doesn't move the table.
+  edgeDir() {
+    const held = this.drag || this.carry || this.refDrag
+    if (!held?.moved) return [0, 0]
+    const p = this.drag ? [this.drag.sx, this.drag.sy] : this.pointers.get(held.pointer)
+    if (!p) return [0, 0]
+    const [sx, sy] = p
+    const dir = (v, size) => (v < EDGE_PX ? -1 : v > size - EDGE_PX ? 1 : 0)
+    return [dir(sx, this.vw), dir(sy, this.vh)]
+  }
+
+  // After the table moves under the pointer, what it holds keeps up with it.
+  follow() {
+    if (this.drag) {
+      this.updatePivot()
+      this.sendLive()
+    } else if (this.carry?.moved) {
+      const p = this.pointers.get(this.carry.pointer)
+      if (p) this.moveCarry(...this.toWorld(...p))
+    }
+    const d = this.refDrag
+    const p = d?.moved && this.pointers.get(d.pointer)
+    if (p) this.moveRef(...this.toWorld(...p))
+  }
+
   // ---- rendering ----------------------------------------------------------
 
   render() {
@@ -3050,41 +3090,26 @@ export class Engine {
       } else again = true
     }
 
-    if (this.panKeys.size) {
-      let vx = 0
-      let vy = 0
-      for (const k of this.panKeys) {
-        vx += PAN_KEYS[k][0]
-        vy += PAN_KEYS[k][1]
-      }
-      if (vx || vy) {
-        this.panSince ||= now
-        const boost = 1 + (PAN_BOOST - 1) * Math.min(1, (now - this.panSince) / PAN_RAMP) ** 2
-        const f = (PAN_SPEED * boost * dt) / 1000 / Math.hypot(vx, vy) / this.cam.z
-        this.cam.x += vx * f
-        this.cam.y += vy * f
-        this.clampCam()
-        if (this.drag) {
-          this.updatePivot()
-          this.sendLive()
-        }
-      } else this.panSince = 0
+    let [vx, vy] = this.edgeDir()
+    for (const k of this.panKeys) {
+      vx += PAN_KEYS[k][0]
+      vy += PAN_KEYS[k][1]
+    }
+    vx = Math.sign(vx)
+    vy = Math.sign(vy)
+    if (vx || vy) {
+      this.panSince ||= now
+      const boost = 1 + (PAN_BOOST - 1) * Math.min(1, (now - this.panSince) / PAN_RAMP) ** 2
+      const f = (PAN_SPEED * boost * dt) / 1000 / Math.hypot(vx, vy) / this.cam.z
+      this.cam.x += vx * f
+      this.cam.y += vy * f
+      this.clampCam()
+      this.follow()
       again = true
     } else this.panSince = 0
 
     if (this.drag) {
       const d = this.drag
-      const edge = 40
-      const vx = d.sx < edge ? -(edge - d.sx) : d.sx > this.vw - edge ? d.sx - (this.vw - edge) : 0
-      const vy = d.sy < edge ? -(edge - d.sy) : d.sy > this.vh - edge ? d.sy - (this.vh - edge) : 0
-      if (vx || vy) {
-        this.cam.x += (vx * 0.4 * dt) / 16 / this.cam.z
-        this.cam.y += (vy * 0.4 * dt) / 16 / this.cam.z
-        this.clampCam()
-        this.updatePivot()
-        this.sendLive()
-        again = true
-      }
       const target = d.k * Q
       d.angle += (target - d.angle) * ease(dt, 45)
       if (Math.abs(target - d.angle) > 0.001) again = true

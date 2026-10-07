@@ -2,7 +2,6 @@
   --field: rgba(10, 10, 10, 0.025);
   --line-strong: rgba(10, 10, 10, 0.28);
   --ring: rgba(10, 10, 10, 0.08);
-  --note: #fff475;
   --bg: #fafafa;
   --fg: #0a0a0a;
   --muted: rgba(10, 10, 10, 0.45);
@@ -31,7 +30,6 @@
     --dot: rgba(255, 255, 255, 0.09);
     --shadow: rgba(0, 0, 0, 0.85);
     --sel: #5b8cff;
-    --note: #f2e45c;
     --field: rgba(245, 245, 245, 0.035);
     --line-strong: rgba(245, 245, 245, 0.32);
     --ring: rgba(245, 245, 245, 0.1);
@@ -43,7 +41,6 @@
   --field: rgba(245, 245, 245, 0.035);
   --line-strong: rgba(245, 245, 245, 0.32);
   --ring: rgba(245, 245, 245, 0.1);
-  --note: #f2e45c;
   --bg: #0a0a0a;
   --fg: #f5f5f5;
   --muted: rgba(245, 245, 245, 0.45);
@@ -1298,38 +1295,85 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   display: flex;
   flex-direction: column;
   width: calc(var(--u) * var(--nw));
-  padding: calc(var(--u) * 0.1);
+  padding: calc(var(--u) * 0.16) calc(var(--u) * 0.18);
   cursor: grab;
   touch-action: none;
   /* No text selection, loupe or callout from a long press on touch screens; that would steal the drag. */
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
-  border-radius: calc(var(--u) * 0.02);
-  background: var(--note);
-  color: #1c1a0e;
-  box-shadow: 0 calc(var(--u) * 0.05) calc(var(--u) * 0.18) rgba(0, 0, 0, 0.25);
+  border: calc(var(--u) * 0.02) solid var(--line);
+  border-radius: calc(var(--u) * 0.16);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: calc(var(--u) * 0.26);
+  box-shadow: 0 calc(var(--u) * 0.06) calc(var(--u) * 0.24) rgba(0, 0, 0, 0.18);
   pointer-events: auto;
 }
-.note.sel {
-  outline: calc(var(--u) * 0.04) solid var(--sel);
-  outline-offset: calc(var(--u) * 0.02);
+.note.sel,
+.note.marked {
+  border-color: var(--sel);
+  box-shadow:
+    0 0 0 calc(var(--u) * 0.03) var(--sel),
+    0 calc(var(--u) * 0.06) calc(var(--u) * 0.24) rgba(0, 0, 0, 0.18);
 }
 .note.marked {
-  outline: calc(var(--u) * 0.04) solid var(--mark);
-  outline-offset: calc(var(--u) * 0.02);
+  --sel: var(--mark);
+}
+/* Three dots that open the note's menu, shown on hover or while the note is selected, like a tray's. */
+.note-menu {
+  position: absolute;
+  top: calc(var(--u) * -0.16);
+  right: calc(var(--u) * -0.16);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--u) * 0.04);
+  width: calc(var(--u) * 0.36);
+  height: calc(var(--u) * 0.36);
+  padding: 0;
+  border: calc(var(--u) * 0.02) solid var(--line);
+  border-radius: calc(var(--u) * 0.1);
+  background: var(--bg);
+  box-shadow: 0 calc(var(--u) * 0.03) calc(var(--u) * 0.1) rgba(0, 0, 0, 0.15);
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.75);
+  transition:
+    opacity 0.15s,
+    transform 0.15s;
+}
+.note-menu i {
+  width: calc(var(--u) * 0.045);
+  height: calc(var(--u) * 0.045);
+  border-radius: 50%;
+  background: currentColor;
+}
+.note:hover .note-menu,
+.note.sel .note-menu {
+  opacity: 1;
+  transform: none;
+}
+.note-menu:hover {
+  background: linear-gradient(var(--hover), var(--hover)) var(--bg);
+  color: var(--fg);
 }
 .note textarea {
-  height: calc(var(--u) * 2.2);
-  padding: calc(var(--u) * 0.06);
+  display: block;
+  width: 100%;
+  min-height: 1.4em;
+  padding: 0;
   cursor: grab;
   border: 0;
   outline: 0;
   background: transparent;
   color: inherit;
-  /* The font size is set to fit the text, see fitText() in Notes.jsx. */
-  font-size: calc(var(--u) * 0.25);
-  line-height: 1.25;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   overflow: hidden;
   resize: none;
   /* Presses go to the note (to drag or select it) until it is being edited; a double tap starts editing. */
@@ -1337,7 +1381,11 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   -webkit-user-select: none;
   user-select: none;
 }
+.note textarea::placeholder {
+  color: var(--muted);
+}
 .note textarea:focus {
+  cursor: text;
   pointer-events: auto;
   -webkit-user-select: text;
   user-select: text;
@@ -1345,12 +1393,13 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 .note-ghost {
   position: fixed;
   top: -20px;
-  left: -28px;
+  left: -32px;
   z-index: 50;
-  width: 56px;
-  height: 48px;
-  border-radius: 3px;
-  background: var(--note);
+  width: 64px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
   box-shadow: 0 8px 24px var(--shadow);
   pointer-events: none;
 }
@@ -1480,10 +1529,6 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
     width: 220px;
   }
 }
-.note textarea:focus {
-  cursor: text;
-}
-
 /* ---- help dialog ---- */
 
 .modal.help {

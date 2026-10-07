@@ -2,6 +2,11 @@
 
 ## 7 October 2026
 
+- Notes have a new look that matches the rest of the table: a plain card in the light or dark theme instead of a yellow sticky note. They are also narrower.
+- Text in a note stays the same size however much you write. The note grows taller to fit it, instead of the text shrinking.
+- Notes have the same **⋯** button as trays and images, on their top right corner, opening the note's menu.
+- The right click menu on a note has an **Edit note** item, the same as double clicking it.
+- Dragging a note or image to the edge of the screen now moves the table, like pieces and trays. Moving the table this way speeds up the longer you hold it there, just like the arrow keys and WASD, for pieces and trays too.
 - Trays have a new **⋯** button in their top right corner, next to the auto sort switch. It opens the tray's menu, the same one you get by right clicking the tray.
 - You can now name a tray and change its colour from its menu. The name shows quietly along the top of the tray, and hovering a name that is cut short shows it in full. Everyone in the room sees the change, and it can be undone.
 - Images have the same **⋯** button in their top right corner, opening the image's menu.
