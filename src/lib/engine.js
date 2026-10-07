@@ -2024,7 +2024,14 @@ export class Engine {
     // Each carried group snaps on its own, so unrelated groups in a selection never merge by accident.
     const g0 = this.g.slice()
     const changed = new Set()
-    for (const grp of this.modules(d.ids)) for (const j of this.snap(grp)) changed.add(j)
+    const trayOf = this.trayMap()
+    const carried = new Set(d.ids)
+    const onto = []
+    for (const grp of this.modules(d.ids)) {
+      const out = {}
+      for (const j of this.snap(grp, out)) changed.add(j)
+      if (out.onto !== undefined && !carried.has(out.onto)) onto.push(out.onto)
+    }
     this.joined(g0, changed, true)
 
     // The landing shrinks the pieces back around the pointer, moved along with them if everything
@@ -2043,13 +2050,31 @@ export class Engine {
     this.canvas.style.cursor = ''
     // Pieces carried along with their tray stay in it, wherever it's let go.
     const tray = this.carry?.trays[0] && this.trays.find((t) => t.id === this.carry.trays[0].id)
-    const change = this.placeInTrays(d.ids, d.px, d.py, tray)
+    if (tray) {
+      this.placeInTrays(d.ids, d.px, d.py, tray)
+      this.commit(changed)
+      // Moving a whole tray doesn't sort it again.
+      return
+    }
+    // Each group the carried pieces are in now goes in the tray its pieces that weren't carried were
+    // in (those it snapped onto first), or in none. All carried, it goes by the tray under the pointer.
+    const anchor = new Map()
+    for (const q of onto) if (!anchor.has(this.g[q])) anchor.set(this.g[q], q)
+    for (const i of changed) if (!carried.has(i) && !anchor.has(this.g[i])) anchor.set(this.g[i], i)
+    const loose = []
+    const changes = []
+    for (const grp of this.modules(d.ids)) {
+      const a = anchor.get(this.g[grp[0]])
+      if (a === undefined) loose.push(...grp)
+      else changes.push(this.placeInTrays(grp, d.px, d.py, this.trays.find((t) => t.id === trayOf.get(a)) || null))
+    }
+    if (loose.length) changes.push(this.placeInTrays(loose, d.px, d.py))
     this.commit(changed)
-    // Moving a whole tray doesn't sort it again.
-    if (!tray) this.autoSort(change)
+    for (const c of changes) this.autoSort(c)
   }
 
-  snap(ids) {
+  // With out given, out.onto is set to the piece the group snapped onto, if any.
+  snap(ids, out) {
     const { cols, rows } = this.room
     const { w, h, S } = this.geo
     const thr = S * 0.22
@@ -2102,6 +2127,7 @@ export class Engine {
       }
     }
     if (!best) return changed
+    if (out) out.onto = best.q
     shift(ids, best.dx, best.dy)
     credit(ids)
     const target = this.members(this.g[best.q])
@@ -2685,12 +2711,12 @@ export class Engine {
   }
 
   // After this player dropped pieces (ids) with the pointer at (wx, wy): everything carried goes in
-  // the tray given (the one it was carried with), or else the tray under the pointer, and comes out
-  // of its tray when let go of anywhere else. Every tray that gained or lost pieces, or had them
-  // moved, fits itself around them again.
-  placeInTrays(ids, wx, wy, into = null) {
+  // the tray given (null: none), or else the tray under the pointer, and comes out of its tray when
+  // let go of anywhere else. Every tray that gained or lost pieces, or had them moved, fits itself
+  // around them again.
+  placeInTrays(ids, wx, wy, into) {
     if (!this.trays.length) return
-    for (let k = this.trays.length - 1; k >= 0 && !into; k--) {
+    for (let k = this.trays.length - 1; k >= 0 && into === undefined; k--) {
       const t = this.trays[k]
       if (wx >= t.x && wx <= t.x + t.w && wy >= t.y && wy <= t.y + t.h) into = t
     }

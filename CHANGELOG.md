@@ -6,6 +6,7 @@
 - You can now name a tray and change its colour from its menu. The name shows quietly along the top of the tray, and hovering a name that is cut short shows it in full. Everyone in the room sees the change, and it can be undone.
 - When zoomed far out, a tray's number and buttons now hide once they no longer fit inside it.
 - Moving an empty tray, or images and notes as part of a selection, now saves where you put them. Before, they could jump back after reloading the page, and undo skipped the move.
+- When you join pieces, the piece you were holding decides the tray. Joining a piece from a tray to a group on the table takes it out of the tray, even if you let go close to the tray. Joining a group to a piece in a tray puts the whole group in that tray.
 
 ## 6 October 2026
 
