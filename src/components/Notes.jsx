@@ -65,7 +65,7 @@ function Note({ note, engine, focus, selected, mark, canEdit, author, ensureName
         engine.openNoteMenu(note.id, e.clientX, e.clientY)
       }}
       onPointerMove={(e) => {
-        if (e.buttons) return engine.showTip(null)
+        if (e.buttons || e.target.closest('button')) return engine.showTip(null)
         const r = engine.canvas.getBoundingClientRect()
         engine.showTip({ text: author, sx: e.clientX - r.left, sy: e.clientY - r.top })
       }}
@@ -97,7 +97,7 @@ function Note({ note, engine, focus, selected, mark, canEdit, author, ensureName
   )
 }
 
-export function NotesLayer({ engine, roomId, me, nameOf, initial, busRef, createRef, onNotes, ensureName, requireName }) {
+export function NotesLayer({ engine, roomId, me, nameOf, initial, busRef, createRef, ensureName, requireName }) {
   const [notes, setNotes] = useState(initial)
   const [focusId, setFocusId] = useState(null)
   const [selected, setSelected] = useState(() => new Set())
@@ -111,10 +111,6 @@ export function NotesLayer({ engine, roomId, me, nameOf, initial, busRef, create
   useEffect(() => {
     engine.resetSeen('note', initial)
   }, [engine, initial])
-
-  useEffect(() => {
-    onNotes?.(notes)
-  }, [notes, onNotes])
 
   useEffect(() => {
     const el = layer.current

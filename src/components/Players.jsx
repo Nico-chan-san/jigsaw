@@ -1,17 +1,16 @@
 import { formatTime } from '../lib/time.js'
-import { Clock, Crown, Note, Piece } from './icons.jsx'
+import { Clock, Crown, Piece } from './icons.jsx'
 
 // Everyone who has done something in this jigsaw, most pieces connected first, then most time.
 // Players are kept apart by id, since two of them can share a name.
-export function rankPlayers({ stats, times, notes, nameOf }) {
+export function rankPlayers({ stats, times, nameOf }) {
   const map = new Map()
   const get = (id) => {
-    if (!map.has(id)) map.set(id, { id, name: nameOf(id), pieces: 0, seconds: 0, notes: 0 })
+    if (!map.has(id)) map.set(id, { id, name: nameOf(id), pieces: 0, seconds: 0 })
     return map.get(id)
   }
   for (const s of stats.values()) get(s.id).pieces = s.pieces
   for (const [id, seconds] of Object.entries(times)) if (seconds > 0) get(id).seconds = seconds
-  for (const n of notes) if (n.author) get(n.author).notes++
 
   return [...map.values()].sort(
     (a, b) =>
@@ -31,8 +30,8 @@ function lastPlayed(id, online, seen) {
 
 // owner is the id of the player who made the jigsaw, marked with a crown. online is a Set of the
 // player ids here now, seen when the others were last here (ms by id).
-export default function Players({ open, stats, times, notes, me, owner, nameOf, online, seen }) {
-  const list = rankPlayers({ stats, times, notes, nameOf })
+export default function Players({ open, stats, times, me, owner, nameOf, online, seen }) {
+  const list = rankPlayers({ stats, times, nameOf })
 
   return (
     <aside className={`players${open ? ' open' : ''}`}>
@@ -67,14 +66,6 @@ export default function Players({ open, stats, times, notes, me, owner, nameOf, 
                 {formatTime(p.seconds)}
               </span>
             </span>
-            {p.notes > 0 && (
-              <span className="psub">
-                <span title="Notes written">
-                  <Note />
-                  {p.notes}
-                </span>
-              </span>
-            )}
           </li>
         ))}
       </ol>

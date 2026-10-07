@@ -1461,10 +1461,9 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 .players li {
   display: grid;
   grid-template-columns: 22px 1fr auto;
-  grid-template-areas: 'rank name stats' 'rank sub sub';
+  grid-template-areas: 'rank name stats';
   align-items: center;
   column-gap: 6px;
-  row-gap: 2px;
   padding: 8px;
   border-radius: 8px;
   counter-increment: rank;
@@ -1495,15 +1494,7 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   display: inline-flex;
   gap: 10px;
 }
-.psub {
-  grid-area: sub;
-  display: inline-flex;
-  gap: 10px;
-  color: var(--muted);
-  font-size: 12px;
-}
-.pstats span,
-.psub span {
+.pstats span {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -1518,10 +1509,6 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   height: 14px;
   color: var(--muted);
 }
-.psub svg {
-  width: 12px;
-  height: 12px;
-}
 
 @media (max-width: 640px) {
   .players {
@@ -1532,7 +1519,7 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 /* ---- help dialog ---- */
 
 .modal.help {
-  width: min(760px, 100%);
+  width: min(1040px, 100%);
 }
 /* ---- changelog ---- */
 
@@ -1572,9 +1559,9 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 /* Two columns: mouse on the left, the longer keyboard list on the right. */
 .help-body {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   align-content: start;
-  gap: 20px 32px;
+  gap: 20px 28px;
 }
 .help-body section {
   display: flex;
@@ -1583,10 +1570,6 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 }
 .help-body .help-touch {
   grid-column: 1 / -1;
-}
-.help-body .help-keyboard {
-  grid-column: 2;
-  grid-row: 1 / span 2;
 }
 /* Keys in one column, what they do in the next, lined up across the section. */
 .help-body dl {
@@ -1646,13 +1629,14 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   white-space: nowrap;
 }
 
+@media (max-width: 900px) {
+  .help-body {
+    grid-template-columns: 1fr 1fr;
+  }
+}
 @media (max-width: 640px) {
   .help-body {
     grid-template-columns: 1fr;
-  }
-  .help-body .help-keyboard {
-    grid-column: auto;
-    grid-row: auto;
   }
 }
 

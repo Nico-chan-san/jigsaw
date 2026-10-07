@@ -82,6 +82,10 @@ function readColors() {
   const s = getComputedStyle(document.documentElement)
   return {
     bg: s.getPropertyValue('--canvas').trim(),
+    // Notes and the buttons on trays and images.
+    card: s.getPropertyValue('--bg').trim(),
+    edge: s.getPropertyValue('--line').trim(),
+    muted: s.getPropertyValue('--muted').trim(),
     dot: s.getPropertyValue('--dot').trim(),
     shadow: s.getPropertyValue('--shadow').trim(),
     line: s.getPropertyValue('--fg').trim(),
@@ -125,7 +129,6 @@ export default function Room({ id }) {
   const createNote = useRef(null)
   const [stats, setStats] = useState(() => new Map())
   const [times, setTimes] = useState({})
-  const [notes, setNotes] = useState([])
   // Player ids in the room right now, and when the others were last here.
   const [online, setOnline] = useState(() => new Set())
   const [seen, setSeen] = useState({})
@@ -138,7 +141,6 @@ export default function Room({ id }) {
     setHelp(false)
   }, [id])
   const onTimes = useCallback((t) => setTimes(t), [])
-  const onNotes = useCallback((n) => setNotes(n), [])
   const fullscreen = useFullscreen()
   const notch = useNotch()
   const idle = useIdle()
@@ -523,7 +525,6 @@ export default function Room({ id }) {
           ensureName={ensureName}
           requireName={requireName}
           createRef={createNote}
-          onNotes={onNotes}
         />
       )}
       <canvas ref={cursors} className="cursors" />
@@ -572,7 +573,7 @@ export default function Room({ id }) {
           onClick={async () => {
             const picture = renderShare({
               image: engine.refImg,
-              ranked: rankPlayers({ stats, times, notes, nameOf }),
+              ranked: rankPlayers({ stats, times, nameOf }),
             })
             const result = await shareImage(picture, engine.room?.name).catch(() => null)
             setShared(result)
@@ -591,12 +592,12 @@ export default function Room({ id }) {
       )}
       {podiumShown && (
         <Podium
-          ranked={rankPlayers({ stats, times, notes, nameOf })}
+          ranked={rankPlayers({ stats, times, nameOf })}
           closing={podiumClosing}
           onClose={closePodium}
         />
       )}
-      {engine && !spectate && <Players open={players} stats={stats} times={times} notes={notes} me={playerId} owner={data?.owner} nameOf={nameOf} online={online} seen={seen} />}
+      {engine && !spectate && <Players open={players} stats={stats} times={times} me={playerId} owner={data?.owner} nameOf={nameOf} online={online} seen={seen} />}
     </div>
   )
 }

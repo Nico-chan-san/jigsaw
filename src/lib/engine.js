@@ -47,6 +47,10 @@ const REF_FADE_PX = 300
 const BTN_MS = 140
 // Screen-space size of reference image handles.
 const HANDLE = 7
+// How far a tray's or image's buttons stand out over its top edge, as a part of their size, like a note's.
+const BTN_OUT = 0.44
+// A button of size tag on the top right corner (x, y) of something, standing out over its edges.
+const cornerButton = (x, y, tag) => [x - tag * (1 - BTN_OUT), y - tag * BTN_OUT, x + tag * BTN_OUT, y + tag * (1 - BTN_OUT)]
 // Cursor updates are throttled to this interval (ms); idle cursors vanish after CURSOR_IDLE.
 const CURSOR_MS = 50
 // How many moves of each player can be undone.
@@ -260,6 +264,9 @@ export class Engine {
     this.refDrag = null
     // A shift press on an image, until it turns out to be a click or a resize: { rh, pointer, sx0, sy0 }.
     this.refShift = null
+    // A shift press on a piece in a tray, until it turns out to be a click (select the piece) or a
+    // drag (move the tray): { th, i, pointer, sx0, sy0, wx, wy }.
+    this.trayShift = null
     // An alt drag on an image, changing its opacity: { ref, pointer, sx0, op0, moved }.
     this.refFade = null
     // Tray and image buttons show only while the pointer is over their tray or image: hovered is that
@@ -324,7 +331,7 @@ export class Engine {
     this.moving = new Map()
     // Bursts where pieces just joined: { x, y, t0, a } in world units.
     this.pops = []
-    this.colors = { bg: '#f4f4f4', dot: 'rgba(0,0,0,.12)', shadow: 'rgba(0,0,0,.35)', sel: '#2f6fed' }
+    this.colors = { bg: '#f4f4f4', card: '#fafafa', edge: 'rgba(0,0,0,.1)', dot: 'rgba(0,0,0,.12)', shadow: 'rgba(0,0,0,.35)', sel: '#2f6fed' }
     this.last = performance.now()
     this.lastLive = 0
 
@@ -377,8 +384,12 @@ export class Engine {
       move: (e) => this.onMove(e),
       up: (e) => this.onUp(e),
       wheel: (e) => this.onWheel(e),
-      key: (e) => this.onKey(e),
+      key: (e) => {
+        this.setShift(e)
+        this.onKey(e)
+      },
       keyup: (e) => {
+        this.setShift(e)
         if (this.panKeys.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key)) this.invalidate()
       },
       stopPan: () => this.panKeys.clear(),
@@ -788,6 +799,7 @@ export class Engine {
       notes: notes.map((n) => ({ id: n.id, x: n.x, y: n.y })),
       trays: [],
     }
+    this.canvas.style.cursor = 'grabbing'
     // Carried images go on top, like a lifted piece.
     this.refs = this.refs.filter((r) => !this.selRefs.has(r.id)).concat(this.refs.filter((r) => this.selRefs.has(r.id)))
     this.invalidate()
@@ -802,6 +814,7 @@ export class Engine {
     this.canvas.setPointerCapture(e.pointerId)
     this.pointers.set(e.pointerId, [sx, sy])
     this.carry = { pointer: e.pointerId, wx, wy, sx0: sx, sy0: sy, moved: false, note: id, refs: [], notes: [{ id, x: n.x, y: n.y }], trays: [] }
+    this.canvas.style.cursor = 'grabbing'
   }
 
   carryAt(wx, wy, c = this.carry) {
@@ -991,6 +1004,7 @@ export class Engine {
       this.refDrag = null
       this.refShift = null
       this.refFade = null
+      this.trayShift = null
       this.pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), m: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }
       this.invalidate()
       return
@@ -1035,19 +1049,20 @@ export class Engine {
     this.setHovered(this.hoverKey(picked))
     const { rh, th } = picked
     const i = this.done ? -1 : picked.i
+    // Shift drag on a tray moves the tray, even from a piece in it, once the pointer moves; a shift
+    // click on a piece in it still adds it to the selection or takes it out.
+    if (th && e.shiftKey) {
+      if (i < 0) return this.startTrayDrag(th, e.pointerId, sx, sy, wx, wy)
+      if (this.guard && !this.guard()) return
+      this.trayShift = { th, i, pointer: e.pointerId, sx0: sx, sy0: sy, wx, wy }
+      return
+    }
     if (i >= 0) {
       if (this.held.get(i) > performance.now()) return
       if (this.guard && !this.guard()) return
       this.selectRef(null)
       this.selectTray(null)
-      if (e.shiftKey) {
-        // Shift-click toggles a group in or out of the selection.
-        const grp = this.members(this.g[i])
-        const next = new Set(this.sel)
-        const on = !next.has(i)
-        for (const j of grp) on ? next.add(j) : next.delete(j)
-        return this.setSelection(next, this.selRefs, this.selNotes)
-      }
+      if (e.shiftKey) return this.toggleGroup(i)
       if (this.sel.has(i)) this.grabSelection(e, { piece: true })
       else {
         if (this.selCount) this.setSelection(new Set())
@@ -1102,6 +1117,16 @@ export class Engine {
     if (!keep && this.selCount) this.setSelection(new Set())
   }
 
+  // Shift-click on a piece: its group goes in or out of the selection.
+  toggleGroup(i) {
+    this.selectRef(null)
+    this.selectTray(null)
+    const next = new Set(this.sel)
+    const on = !next.has(i)
+    for (const j of this.members(this.g[i])) on ? next.add(j) : next.delete(j)
+    this.setSelection(next, this.selRefs, this.selNotes)
+  }
+
   startPan(pointer, sx, sy) {
     this.pan = { pointer, sx, sy }
     this.canvas.style.cursor = 'grabbing'
@@ -1137,6 +1162,13 @@ export class Engine {
     // pointer that is already down arrives as a move with e.button set, not as a pointerdown.
     if (this.drag && e.pointerId === this.drag.pointer && e.button === 2 && e.buttons & 2) this.spin(1, e.shiftKey)
 
+    // A shift press on a piece in a tray that starts moving picks up the tray, from where the press was.
+    const ts = this.trayShift
+    if (ts && e.pointerId === ts.pointer) {
+      if (Math.hypot(sx - ts.sx0, sy - ts.sy0) <= CLICK_PX) return
+      this.trayShift = null
+      if (this.trays.includes(ts.th.tray)) this.startTrayDrag(ts.th, ts.pointer, ts.sx0, ts.sy0, ts.wx, ts.wy)
+    }
     const c = this.carry
     if (c && e.pointerId === c.pointer) {
       if (Math.hypot(sx - c.sx0, sy - c.sy0) > CLICK_PX) c.moved = true
@@ -1223,7 +1255,10 @@ export class Engine {
       this.moveRef(...this.toWorld(sx, sy))
       return
     }
-    if (e.pointerType === 'mouse' && !e.buttons) this.hover(sx, sy)
+    if (e.pointerType === 'mouse' && !e.buttons) {
+      this.shift = e.shiftKey
+      this.hover(sx, sy)
+    }
   }
 
   onUp(e) {
@@ -1236,6 +1271,11 @@ export class Engine {
       if (!d.moved && d.piece !== undefined) this.setSelection(new Set(this.members(this.g[d.piece])))
     }
     if (this.carry && e.pointerId === this.carry.pointer) this.endCarry()
+    if (this.trayShift && e.pointerId === this.trayShift.pointer) {
+      const { i } = this.trayShift
+      this.trayShift = null
+      this.toggleGroup(i)
+    }
     if (this.pan && e.pointerId === this.pan.pointer) {
       const m = this.pan.menu
       this.pan = null
@@ -1264,6 +1304,8 @@ export class Engine {
       this.onRef?.(ref, false)
     }
     if (this.pointers.size < 2) this.pinch = null
+    // Letting go: the cursor shows what is under it again.
+    if (!this.pointers.size && e.pointerType === 'mouse') this.hover(...this.pos(e))
     // The next press is a new gesture, for undo.
     if (!this.pointers.size) {
       this.inPress = false
@@ -1383,31 +1425,36 @@ export class Engine {
       return this.showTip(null)
     }
     const [wx, wy] = this.toWorld(sx, sy)
-    const { rh, th, i } = this.pick(sx, sy)
-    this.setHovered(this.hoverKey({ rh, th }))
+    let { rh, th, i } = this.pick(sx, sy)
+    // With shift, a press on a tray takes the tray, not the piece under the pointer.
+    if (this.shift && th) i = -1
+    // The buttons stand out over the edge, so a tray or image stays hovered while over them.
     const b = this.trayButtonAt(sx, sy)
+    const rb = !b && this.refButtonAt(sx, sy)
+    if (!b && !rb) this.setHovered(this.hoverKey({ rh, th }))
     if (b) {
       this.canvas.style.cursor = 'pointer'
       this.setHighlight(null)
-      const text =
-        b.kind === 'menu'
-          ? 'Tray settings: name, colour and more'
-          : b.tray.auto
-            ? 'Auto sort is on: pieces put in this tray sort themselves'
-            : 'Auto sort: sort the pieces put in this tray'
+      if (b.kind === 'menu') return this.showTip(null)
+      const text = b.tray.auto ? 'Auto sort is on: pieces put in this tray sort themselves' : 'Auto sort: sort the pieces put in this tray'
       return this.showTip({ text, sx, sy })
     }
-    if (this.refButtonAt(sx, sy)) {
+    if (rb) {
       this.canvas.style.cursor = 'pointer'
       this.setHighlight(null)
-      return this.showTip({ text: 'Image settings: opacity and more', sx, sy })
+      return this.showTip(null)
     }
     // A tray name that was cut short shows in full.
-    const nm = th && i < 0 && this.trayNames?.get(th.tray.id)
-    if (nm && sx >= nm.rect[0] && sx <= nm.rect[2] && sy >= nm.rect[1] && sy <= nm.rect[3]) {
+    const nm = [...(this.trayNames?.values() || [])].find((n) => sx >= n.rect[0] && sx <= n.rect[2] && sy >= n.rect[1] && sy <= n.rect[3])
+    if (nm && (!th || i < 0)) {
       this.canvas.style.cursor = this.cursorFor(-1, null, th)
       this.setHighlight(null)
       return this.showTip({ text: nm.text, sx, sy })
+    }
+    // Shift over an image: a drag resizes it from the nearest corner, so the cursor says so.
+    if (this.shift && i < 0 && rh?.mode === 'move') {
+      const [x0, y0, x1, y1] = this.refRect(rh.ref)
+      rh = { ref: rh.ref, mode: 'resize', cx: sx > (x0 + x1) / 2 ? 1 : 0, cy: sy > (y0 + y1) / 2 ? 1 : 0 }
     }
     this.canvas.style.cursor = this.cursorFor(this.done ? -1 : i, rh, th)
     let hl = null
@@ -1422,12 +1469,17 @@ export class Engine {
   }
 
   // The pointer over a piece (i), an image's handles (rh) or a tray's name strip (th).
+  // Shift pressed or let go: the cursor over an image changes with it, if nothing is being held.
+  setShift(e) {
+    if (e.key !== 'Shift' || this.shift === e.shiftKey) return
+    this.shift = e.shiftKey
+    if (!this.pointers.size && this.pointerAt && this.canvas.matches(':hover')) this.hover(...this.pointerAt)
+  }
+
+  // An open hand over anything that can be dragged, like on notes; it closes while dragging.
   cursorFor(i, rh, th) {
-    if (i >= 0) return 'grab'
-    if (th) return 'move'
-    if (!rh) return ''
-    if (rh.mode === 'resize') return rh.cx === rh.cy ? 'nwse-resize' : 'nesw-resize'
-    return 'move'
+    if (rh?.mode === 'resize') return rh.cx === rh.cy ? 'nwse-resize' : 'nesw-resize'
+    return i >= 0 || th || rh ? 'grab' : ''
   }
 
   setHighlight(hl) {
@@ -2569,14 +2621,14 @@ export class Engine {
     this.invalidate()
   }
 
-  // The screen rectangle, [x0, y0, x1, y1], of an image's menu button inside its top right corner,
-  // clear of the resize handle there. Null when the image is too small on the screen to hold it.
+  // The screen rectangle, [x0, y0, x1, y1], of an image's menu button on its top right corner,
+  // standing out over the edges a little, like a note's. That corner has no resize handle. Null when
+  // the image is too small on the screen to hold it.
   refButton(ref) {
     const tag = Math.max(14, this.geo.S * 0.4 * this.cam.z)
-    const gap = Math.max(tag * 0.3, HANDLE + 4)
     const [x0, y0, x1, y1] = this.refRect(ref)
-    if (x1 - x0 < tag + gap * 2 || y1 - y0 < tag + gap * 2) return null
-    return [x1 - gap - tag, y0 + gap, x1 - gap, y0 + gap + tag]
+    if (x1 - x0 < tag * 2 || y1 - y0 < tag * 2) return null
+    return cornerButton(x1, y0, tag)
   }
 
   // The image whose menu button is at a screen point, if any.
@@ -2619,6 +2671,8 @@ export class Engine {
       const [x0, y0, x1, y1] = this.refRect(sel)
       for (const cx of [0, 1]) {
         for (const cy of [0, 1]) {
+          // The top right corner holds the menu button instead.
+          if (cx && !cy) continue
           const hx = cx ? x1 : x0
           const hy = cy ? y1 : y0
           if (Math.abs(sx - hx) <= HANDLE + 3 && Math.abs(sy - hy) <= HANDLE + 3) return { ref: sel, mode: 'resize', cx, cy }
@@ -2652,6 +2706,7 @@ export class Engine {
       sx: rh.cx ? 1 : -1,
       sy: rh.cy ? 1 : -1,
     }
+    if (rh.mode === 'move') this.canvas.style.cursor = 'grabbing'
     this.invalidate()
   }
 
@@ -2876,16 +2931,15 @@ export class Engine {
     this.autoSort({ into: t })
   }
 
-  // The screen rectangles, [x0, y0, x1, y1], of a tray's buttons at its top right corner: its menu
-  // in the corner and its auto sort switch beside it.
+  // The screen rectangles, [x0, y0, x1, y1], of a tray's buttons along its top edge, standing out over
+  // it a little like a note's: its menu on the top right corner and its auto sort switch beside it.
   trayButtons(t) {
     const { cam, vw, vh } = this
     const tag = Math.max(14, this.geo.S * 0.4 * cam.z)
     const gap = tag * 0.3
-    const x1 = (t.x + t.w - cam.x) * cam.z + vw / 2 - gap
-    const y0 = (t.y - cam.y) * cam.z + vh / 2 + gap
-    const x0 = x1 - tag - gap * 0.6
-    return { menu: [x1 - tag, y0, x1, y0 + tag], auto: [x0 - tag, y0, x0, y0 + tag], tag }
+    const menu = cornerButton((t.x + t.w - cam.x) * cam.z + vw / 2, (t.y - cam.y) * cam.z + vh / 2, tag)
+    const x0 = menu[0] - gap * 0.6
+    return { menu, auto: [x0 - tag, menu[1], x0, menu[3]], tag }
   }
 
   // Whether a tray is big enough on the screen to hold its number and buttons along its top edge.
@@ -2893,8 +2947,8 @@ export class Engine {
   trayTagsFit(t) {
     const tag = Math.max(14, this.geo.S * 0.4 * this.cam.z)
     const gap = tag * 0.3
-    const w = gap + (t.num ? tag + gap : 0) + tag * 2 + gap * 1.6
-    return t.w * this.cam.z >= w && t.h * this.cam.z >= tag + gap * 2
+    const w = (t.num ? tag + gap : 0) + tag * 2 + gap
+    return t.w * this.cam.z >= w && t.h * this.cam.z >= tag * 1.5
   }
 
   // The tray button at a screen point, if any: { tray, kind }, kind being 'menu' or 'auto'.
@@ -3030,6 +3084,7 @@ export class Engine {
       trays: [{ id: t.id, x: t.x, y: t.y }],
       lift: { ids: this.trayPieces(t), wx, wy, sx, sy },
     }
+    this.canvas.style.cursor = 'grabbing'
     this.invalidate()
   }
 
@@ -3455,9 +3510,9 @@ export class Engine {
       ctx.strokeStyle = this.colors.sel
       ctx.strokeRect(x0, y0, x1 - x0, y1 - y0)
       ctx.fillStyle = this.colors.bg
+      // No handle in the top right corner, which holds the menu button.
       for (const [hx, hy] of [
         [x0, y0],
-        [x1, y0],
         [x0, y1],
         [x1, y1],
       ]) {
@@ -3625,32 +3680,41 @@ export class Engine {
   // Each image's menu button: three dots on a chip in the table's colour, so it reads on any image.
   drawRefButtons() {
     const octx = this.octx
-    const { dpr, vw, vh } = this
-    const [br, bg, bb] = rgba(this.colors.bg)
-    const light = 0.2126 * br + 0.7152 * bg + 0.0722 * bb > 0.5
+    const { vw, vh } = this
     for (const ref of this.refs) {
       const look = this.buttonLook(`ref:${ref.id}`)
       const b = look && this.refButton(ref)
       if (!b) continue
-      const [x0, y0, x1, y1] = b
-      if (x0 > vw || y0 > vh || x1 < 0 || y1 < 0) continue
-      const tag = x1 - x0
-      this.scaleAbout(octx, look.s, (x0 + x1) / 2, (y0 + y1) / 2)
-      octx.beginPath()
-      octx.roundRect(x0, y0, tag, tag, tag * 0.3)
-      octx.globalAlpha = 0.85 * look.a
-      octx.fillStyle = this.colors.bg
-      octx.fill()
-      octx.globalAlpha = look.a
-      octx.fillStyle = light ? '#444' : '#ddd'
-      for (const k of [-1, 0, 1]) {
-        octx.beginPath()
-        octx.arc((x0 + x1) / 2 + k * tag * 0.22, (y0 + y1) / 2, tag * 0.07, 0, Math.PI * 2)
-        octx.fill()
-      }
+      if (b[0] > vw || b[1] > vh || b[2] < 0 || b[3] < 0) continue
+      this.drawMenuButton(b, look)
     }
     octx.globalAlpha = 1
-    octx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    octx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
+  }
+
+  // A menu button, the same on trays and images as on notes (.note-menu): three dots on a card.
+  drawMenuButton([x0, y0, x1, y1], look) {
+    const octx = this.octx
+    const tag = x1 - x0
+    this.scaleAbout(octx, look.s, (x0 + x1) / 2, (y0 + y1) / 2)
+    octx.globalAlpha = look.a
+    octx.beginPath()
+    octx.roundRect(x0, y0, tag, y1 - y0, tag * 0.28)
+    octx.shadowColor = 'rgba(0, 0, 0, 0.15)'
+    octx.shadowBlur = tag * 0.28 * this.dpr
+    octx.shadowOffsetY = tag * 0.08 * this.dpr
+    octx.fillStyle = this.colors.card || this.colors.bg
+    octx.fill()
+    octx.shadowColor = 'transparent'
+    octx.lineWidth = Math.max(1, tag * 0.056)
+    octx.strokeStyle = this.colors.edge || 'rgba(0, 0, 0, 0.1)'
+    octx.stroke()
+    octx.fillStyle = this.colors.muted || '#888'
+    for (const k of [-1, 0, 1]) {
+      octx.beginPath()
+      octx.arc((x0 + x1) / 2 + k * tag * 0.236, (y0 + y1) / 2, tag * 0.0625, 0, Math.PI * 2)
+      octx.fill()
+    }
   }
 
   // A tray's number, name and buttons along its top edge, above the notes and trays. They scale with
@@ -3662,13 +3726,6 @@ export class Engine {
     const gap = tag * 0.3
     // Names cut short to fit, by tray id: { rect, text }, so hovering one shows it in full.
     this.trayNames = new Map()
-    // On a light table, names are a darker shade of their tray's colour, to stay readable.
-    const [br, bg, bb] = rgba(this.colors.bg)
-    const light = 0.2126 * br + 0.7152 * bg + 0.0722 * bb > 0.5
-    const shade = (css) => {
-      const [r, g, b] = rgba(css)
-      return `rgb(${[r, g, b].map((v) => Math.round(v * 255 * 0.6)).join(', ')})`
-    }
     const shown = this.trays.filter((t) => this.trayTagsFit(t))
     for (const t of shown) {
       const x = (t.x - cam.x) * cam.z + vw / 2
@@ -3677,31 +3734,38 @@ export class Engine {
       const color = TRAY_COLORS[t.color] || TRAY_COLORS.gray
       octx.setTransform(dpr, 0, 0, dpr, 0, 0)
       octx.textBaseline = 'middle'
-      // The number, in a tag in the tray's colour at its top left corner.
+      // The number and the name, each in a tag in the tray's colour on its top left corner, standing
+      // out over the edges a little like the buttons on the right.
+      const y0 = y - tag * BTN_OUT
+      const mid = y0 + tag / 2 + tag * 0.03
+      let x0 = x - tag * BTN_OUT
       if (t.num) {
         octx.beginPath()
-        octx.roundRect(x + gap, y + gap, tag, tag, tag * 0.3)
+        octx.roundRect(x0, y0, tag, tag, tag * 0.3)
         octx.fillStyle = color
         octx.fill()
         octx.fillStyle = '#fff'
         octx.font = `700 ${Math.round(tag * 0.6)}px system-ui, -apple-system, sans-serif`
         octx.textAlign = 'center'
-        octx.fillText(String(t.num), x + gap + tag / 2, y + gap + tag / 2 + tag * 0.03)
+        octx.fillText(String(t.num), x0 + tag / 2, mid)
         octx.textAlign = 'start'
+        x0 += tag + gap * 0.6
       }
-      // The name, quietly, between the number and the buttons.
       const name = t.name?.trim()
       if (!name) continue
-      const x0 = x + gap + (t.num ? tag + gap : 0)
-      const x1 = this.trayButtons(t).auto[0] - gap
-      octx.font = `500 ${Math.round(tag * 0.55)}px system-ui, -apple-system, sans-serif`
-      const text = fitText(octx, name, x1 - x0)
+      const pad = tag * 0.3
+      const x1 = this.trayButtons(t).auto[0] - gap * 0.6
+      octx.font = `600 ${Math.round(tag * 0.55)}px system-ui, -apple-system, sans-serif`
+      const text = fitText(octx, name, x1 - x0 - pad * 2)
       if (!text) continue
-      octx.globalAlpha = light ? 1 : 0.8
-      octx.fillStyle = light ? shade(color) : color
-      octx.fillText(text, x0, y + gap + tag / 2 + tag * 0.03)
-      octx.globalAlpha = 1
-      if (text !== name) this.trayNames.set(t.id, { rect: [x0, y + gap, x0 + octx.measureText(text).width, y + gap + tag], text: name })
+      const w = octx.measureText(text).width + pad * 2
+      octx.beginPath()
+      octx.roundRect(x0, y0, w, tag, tag * 0.3)
+      octx.fillStyle = color
+      octx.fill()
+      octx.fillStyle = '#fff'
+      octx.fillText(text, x0 + pad, mid)
+      if (text !== name) this.trayNames.set(t.id, { rect: [x0, y0, x0 + w, y0 + tag], text: name })
     }
     for (const t of shown) {
       const look = this.buttonLook(`tray:${t.id}`)
@@ -3711,24 +3775,16 @@ export class Engine {
       const right = b.menu[2]
       if (x0 > vw || y0 > vh || right < 0 || y1 < 0) continue
       const color = TRAY_COLORS[t.color] || TRAY_COLORS.gray
-      // Both buttons grow and fade in together, from their middle.
+      // Both buttons grow and fade in together: the switch from the middle of the two, the menu button
+      // from its own.
       this.scaleAbout(octx, look.s, (x0 + right) / 2, (y0 + y1) / 2)
-      // The menu button in the corner: three dots in an outline.
-      const [m0, n0, m1, n1] = b.menu
-      octx.beginPath()
-      octx.roundRect(m0, n0, m1 - m0, n1 - n0, tag * 0.3)
-      octx.globalAlpha = 0.7 * look.a
-      octx.lineWidth = 1.25
-      octx.strokeStyle = color
-      octx.stroke()
+      // The auto sort switch beside it, on a solid background as it sits on the tray's border:
+      // filled when on, an outline when off.
       octx.globalAlpha = look.a
-      octx.fillStyle = color
-      for (const k of [-1, 0, 1]) {
-        octx.beginPath()
-        octx.arc((m0 + m1) / 2 + k * tag * 0.22, (n0 + n1) / 2, tag * 0.07, 0, Math.PI * 2)
-        octx.fill()
-      }
-      // The auto sort switch beside it: filled when on, an outline when off.
+      octx.fillStyle = this.colors.card || this.colors.bg
+      octx.beginPath()
+      octx.roundRect(x0, y0, x1 - x0, y1 - y0, tag * 0.3)
+      octx.fill()
       octx.beginPath()
       octx.roundRect(x0, y0, x1 - x0, y1 - y0, tag * 0.3)
       if (t.auto) {
@@ -3751,6 +3807,8 @@ export class Engine {
         octx.roundRect(x0 + pad + cx * (cell + gap), y0 + pad + cy * (cell + gap), cell, cell, cell * 0.25)
         octx.fill()
       }
+      // The menu button in the corner, like every menu button.
+      this.drawMenuButton(b.menu, look)
     }
     octx.globalAlpha = 1
     octx.setTransform(dpr, 0, 0, dpr, 0, 0)

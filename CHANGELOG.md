@@ -5,6 +5,13 @@
 - Notes have a new look that matches the rest of the table: a plain card in the light or dark theme instead of a yellow sticky note. They are also narrower.
 - Text in a note stays the same size however much you write. The note grows taller to fit it, instead of the text shrinking.
 - Notes have the same **⋯** button as trays and images, on their top right corner, opening the note's menu.
+- The **⋯** buttons on notes, trays and images all look the same now, and sit on the top right corner, standing out a little over the edge so they don't cover what's underneath. They no longer show a hover text. Images no longer have a resize handle in that corner; use the other three, or hold **Shift** and drag.
+- A tray's number and name now sit in tags in the tray's colour on its top left corner, standing out over the edge like its buttons.
+- Holding **Shift** over an image shows the resize cursor, since a shift drag resizes it.
+- Everything you can drag shows the same open hand, which closes while you hold it: pieces, trays, images and notes.
+- Hold **Shift** and drag a tray to move it, even when you grab it on a piece. A shift click on a piece in a tray still selects it.
+- The players list no longer shows how many notes each player wrote, and writing a note no longer puts you on the list.
+- The help (**H**) is laid out in three columns, mouse, keyboard and tools, with shorter descriptions so it's quicker to scan.
 - The right click menu on a note has an **Edit note** item, the same as double clicking it.
 - Dragging a note or image to the edge of the screen now moves the table, like pieces and trays. Moving the table this way speeds up the longer you hold it there, just like the arrow keys and WASD, for pieces and trays too.
 - Trays have a new **⋯** button in their top right corner, next to the auto sort switch. It opens the tray's menu, the same one you get by right clicking the tray.
