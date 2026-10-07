@@ -1,5 +1,9 @@
 # Changelog
 
+## 7 October 2026
+
+- When you join pieces, the piece you were holding decides the tray. Joining a piece from a tray to a group on the table takes it out of the tray, even if you let go close to the tray. Joining a group to a piece in a tray puts the whole group in that tray.
+
 ## 6 October 2026
 
 - New spectator mode, in the settings menu: watch the jigsaw like a TV broadcast. Every player who is at the table gets their own screen, following their cursor and the area around it, with rounded corners and a shadow. Three players give two screens on top and one below in the middle, and the screens slide around when players join or leave. Only the all jigsaws and settings buttons are left on screen.
