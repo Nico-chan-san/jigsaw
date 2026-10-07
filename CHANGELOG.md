@@ -5,6 +5,7 @@
 - Trays have a new **⋯** button in their top right corner, next to the auto sort switch. It opens the tray's menu, the same one you get by right clicking the tray.
 - You can now name a tray and change its colour from its menu. The name shows quietly along the top of the tray, and hovering a name that is cut short shows it in full. Everyone in the room sees the change, and it can be undone.
 - Images have the same **⋯** button in their top right corner, opening the image's menu.
+- A tray's **⋯** button and auto sort switch, and an image's **⋯** button, now only show while your pointer is over that tray or image, or its right click menu is open, fading in and out. On a touch screen, tap the tray or image to show them.
 - Images can be made see-through with the new opacity slider in their menu. Everyone in the room sees the change, and it can be undone.
 - Hold **Shift** and drag an image to resize it from its nearest corner, without having to grab the corner itself. A shift click still adds the image to the selection.
 - Hold **Alt** and drag an image left or right to make it fainter or more solid.

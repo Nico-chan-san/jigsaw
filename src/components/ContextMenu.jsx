@@ -71,6 +71,12 @@ export default function ContextMenu({ engine, at, onClose }) {
     })
   }, [at, r.width, r.height])
 
+  // While open on a tray or image, its buttons stay shown.
+  useEffect(() => {
+    engine.setMenuFor(at.kind, at.id)
+    return () => engine.setMenuFor(null)
+  }, [engine, at.kind, at.id])
+
   useEffect(() => {
     const away = (e) => !ref.current?.contains(e.target) && onClose()
     const key = (e) => {

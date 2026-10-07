@@ -43,6 +43,8 @@ const TABLE = 10
 const CLICK_PX = 5
 // How far (screen px) an alt drag on an image goes from faintest to solid.
 const REF_FADE_PX = 300
+// How long (ms) tray and image buttons take to fade in or out.
+const BTN_MS = 140
 // Screen-space size of reference image handles.
 const HANDLE = 7
 // Cursor updates are throttled to this interval (ms); idle cursors vanish after CURSOR_IDLE.
@@ -258,6 +260,13 @@ export class Engine {
     this.refShift = null
     // An alt drag on an image, changing its opacity: { ref, pointer, sx0, op0, moved }.
     this.refFade = null
+    // Tray and image buttons show only while the pointer is over their tray or image: hovered is that
+    // one ('tray:<id>' or 'ref:<id>'), btnShow how far each one's buttons have faded in (0 to 1).
+    this.hovered = null
+    // The tray or image whose right click menu is open, the same way: its buttons stay shown.
+    this.menuFor = null
+    this.btnShow = new Map()
+    this.btnT = 0
 
     // Trays, shared by the room: { id, x, y, w, h, color, pieces, author } in world units, x and y
     // being the top left corner. pieces lists the pieces in it, which it fits itself around. The last
@@ -374,6 +383,7 @@ export class Engine {
       leave: () => {
         this.showTip(null)
         this.setHighlight(null)
+        this.setHovered(null)
       },
       // The pointer is tracked over the whole window, so notes and panels above the canvas don't hide it.
       track: (e) => {
@@ -1008,6 +1018,8 @@ export class Engine {
 
     const [wx, wy] = this.toWorld(sx, sy)
     const picked = this.pick(sx, sy)
+    // Without a hover (touch), pressing a tray or image shows its buttons.
+    this.setHovered(this.hoverKey(picked))
     const { rh, th } = picked
     const i = this.done ? -1 : picked.i
     if (i >= 0) {
@@ -1354,9 +1366,12 @@ export class Engine {
     if (this.panMode) {
       this.canvas.style.cursor = 'grab'
       this.setHighlight(null)
+      this.setHovered(null)
       return this.showTip(null)
     }
     const [wx, wy] = this.toWorld(sx, sy)
+    const { rh, th, i } = this.pick(sx, sy)
+    this.setHovered(this.hoverKey({ rh, th }))
     const b = this.trayButtonAt(sx, sy)
     if (b) {
       this.canvas.style.cursor = 'pointer'
@@ -1374,7 +1389,6 @@ export class Engine {
       this.setHighlight(null)
       return this.showTip({ text: 'Image settings: opacity and more', sx, sy })
     }
-    const { rh, th, i } = this.pick(sx, sy)
     // A tray name that was cut short shows in full.
     const nm = th && i < 0 && this.trayNames?.get(th.tray.id)
     if (nm && sx >= nm.rect[0] && sx <= nm.rect[2] && sy >= nm.rect[1] && sy <= nm.rect[3]) {
@@ -2555,6 +2569,7 @@ export class Engine {
   // The image whose menu button is at a screen point, if any.
   refButtonAt(sx, sy) {
     for (let k = this.refs.length - 1; k >= 0; k--) {
+      if (this.hovered !== `ref:${this.refs[k].id}`) continue
       const b = this.refButton(this.refs[k])
       if (b && sx >= b[0] && sx <= b[2] && sy >= b[1] && sy <= b[3]) return this.refs[k]
     }
@@ -2872,7 +2887,7 @@ export class Engine {
   trayButtonAt(sx, sy) {
     for (let k = this.trays.length - 1; k >= 0; k--) {
       const t = this.trays[k]
-      if (!this.trayTagsFit(t)) continue
+      if (this.hovered !== `tray:${t.id}` || !this.trayTagsFit(t)) continue
       const b = this.trayButtons(t)
       for (const kind of ['menu', 'auto']) {
         const [x0, y0, x1, y1] = b[kind]
@@ -3532,6 +3547,56 @@ export class Engine {
     ctx.shadowColor = 'transparent'
   }
 
+  // What the pointer is over, for showing buttons: 'ref:<id>', 'tray:<id>' or null.
+  hoverKey({ rh, th }) {
+    return rh ? `ref:${rh.ref.id}` : th ? `tray:${th.tray.id}` : null
+  }
+
+  setHovered(key) {
+    if (this.hovered === key) return
+    this.hovered = key
+    this.invalidate()
+  }
+
+  // The context menu opened (kind, id) or closed (null) on a tray or image.
+  setMenuFor(kind, id) {
+    this.menuFor = kind === 'tray' || kind === 'ref' ? `${kind}:${id}` : null
+    this.invalidate()
+  }
+
+  // Moves each tray's and image's buttons a frame's worth towards shown (hovered) or hidden.
+  stepButtons() {
+    const now = performance.now()
+    const dt = Math.min(64, now - (this.btnT || now))
+    this.btnT = now
+    for (const key of [this.hovered, this.menuFor]) if (key && !this.btnShow.has(key)) this.btnShow.set(key, 0)
+    let moving = false
+    for (const [key, v] of this.btnShow) {
+      const to = key === this.hovered || key === this.menuFor ? 1 : 0
+      const next = to ? Math.min(1, v + dt / BTN_MS) : Math.max(0, v - dt / BTN_MS)
+      if (!next && !to) this.btnShow.delete(key)
+      else this.btnShow.set(key, next)
+      if (next !== to) moving = true
+    }
+    if (moving) this.invalidate()
+    else this.btnT = 0
+  }
+
+  // How shown a tray's or image's buttons are: { a, s }, the opacity and scale to draw them at, eased.
+  // Null when hidden.
+  buttonLook(key) {
+    const v = this.btnShow.get(key)
+    if (!v) return null
+    const e = 1 - (1 - v) ** 3
+    return { a: e, s: 0.75 + 0.25 * e }
+  }
+
+  // Sets octx to draw at scale s around the screen point (cx, cy).
+  scaleAbout(octx, s, cx, cy) {
+    const d = this.dpr
+    octx.setTransform(d * s, 0, 0, d * s, d * cx * (1 - s), d * cy * (1 - s))
+  }
+
   // Each image's menu button: three dots on a chip in the table's colour, so it reads on any image.
   drawRefButtons() {
     const octx = this.octx
@@ -3539,18 +3604,19 @@ export class Engine {
     const [br, bg, bb] = rgba(this.colors.bg)
     const light = 0.2126 * br + 0.7152 * bg + 0.0722 * bb > 0.5
     for (const ref of this.refs) {
-      const b = this.refButton(ref)
+      const look = this.buttonLook(`ref:${ref.id}`)
+      const b = look && this.refButton(ref)
       if (!b) continue
       const [x0, y0, x1, y1] = b
       if (x0 > vw || y0 > vh || x1 < 0 || y1 < 0) continue
       const tag = x1 - x0
-      octx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      this.scaleAbout(octx, look.s, (x0 + x1) / 2, (y0 + y1) / 2)
       octx.beginPath()
       octx.roundRect(x0, y0, tag, tag, tag * 0.3)
-      octx.globalAlpha = 0.85
+      octx.globalAlpha = 0.85 * look.a
       octx.fillStyle = this.colors.bg
       octx.fill()
-      octx.globalAlpha = 1
+      octx.globalAlpha = look.a
       octx.fillStyle = light ? '#444' : '#ddd'
       for (const k of [-1, 0, 1]) {
         octx.beginPath()
@@ -3558,6 +3624,8 @@ export class Engine {
         octx.fill()
       }
     }
+    octx.globalAlpha = 1
+    octx.setTransform(dpr, 0, 0, dpr, 0, 0)
   }
 
   // A tray's number, name and buttons along its top edge, above the notes and trays. They scale with
@@ -3611,21 +3679,24 @@ export class Engine {
       if (text !== name) this.trayNames.set(t.id, { rect: [x0, y + gap, x0 + octx.measureText(text).width, y + gap + tag], text: name })
     }
     for (const t of shown) {
+      const look = this.buttonLook(`tray:${t.id}`)
+      if (!look) continue
       const b = this.trayButtons(t)
       const [x0, y0, x1, y1] = b.auto
       const right = b.menu[2]
       if (x0 > vw || y0 > vh || right < 0 || y1 < 0) continue
       const color = TRAY_COLORS[t.color] || TRAY_COLORS.gray
-      octx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      // Both buttons grow and fade in together, from their middle.
+      this.scaleAbout(octx, look.s, (x0 + right) / 2, (y0 + y1) / 2)
       // The menu button in the corner: three dots in an outline.
       const [m0, n0, m1, n1] = b.menu
       octx.beginPath()
       octx.roundRect(m0, n0, m1 - m0, n1 - n0, tag * 0.3)
-      octx.globalAlpha = 0.7
+      octx.globalAlpha = 0.7 * look.a
       octx.lineWidth = 1.25
       octx.strokeStyle = color
       octx.stroke()
-      octx.globalAlpha = 1
+      octx.globalAlpha = look.a
       octx.fillStyle = color
       for (const k of [-1, 0, 1]) {
         octx.beginPath()
@@ -3639,11 +3710,11 @@ export class Engine {
         octx.fillStyle = color
         octx.fill()
       } else {
-        octx.globalAlpha = 0.7
+        octx.globalAlpha = 0.7 * look.a
         octx.lineWidth = 1.25
         octx.strokeStyle = color
         octx.stroke()
-        octx.globalAlpha = 1
+        octx.globalAlpha = look.a
       }
       // A little grid of four squares: the pieces laid out.
       octx.fillStyle = t.auto ? '#fff' : color
@@ -3656,6 +3727,8 @@ export class Engine {
         octx.fill()
       }
     }
+    octx.globalAlpha = 1
+    octx.setTransform(dpr, 0, 0, dpr, 0, 0)
   }
 
   drawCursors() {
@@ -3666,6 +3739,7 @@ export class Engine {
       ctx.clearRect(0, 0, this.overlay.width, this.overlay.height)
     }
     this.cursorsDrawn = this.cursors.size > 0 || this.trays.length > 0 || this.refs.length > 0
+    this.stepButtons()
     this.drawRefButtons()
     this.drawTrayTags()
     if (!this.cursors.size) return
