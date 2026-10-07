@@ -1,8 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import TextField from './TextField.jsx'
+import { TRAY_COLORS } from '../lib/engine.js'
 
-// The right click menu on a piece, tray, image or note: its actions with their shortcuts.
+// The right click menu on a piece, tray, image or note: its actions with their shortcuts. A tray's
+// menu starts with its name and colour.
 export default function ContextMenu({ engine, at, onClose }) {
   const ref = useRef(null)
+  const nameRef = useRef(null)
   const [pos, setPos] = useState({ left: at.x, top: at.y })
   const r = engine.canvas.getBoundingClientRect()
 
@@ -13,6 +17,17 @@ export default function ContextMenu({ engine, at, onClose }) {
   }
   const tray = at.kind === 'tray' && engine.trays.find((t) => t.id === at.id)
   const empty = at.kind === 'tray' && !tray?.pieces.length
+  const [name, setName] = useState(tray?.name || '')
+  const [color, setColor] = useState(tray?.color)
+  // The name being typed, saved on Enter, when the field loses focus or when the menu closes; null
+  // once saved, or when Escape drops it.
+  const draft = useRef(null)
+  const saveName = () => {
+    if (draft.current === null) return
+    engine.setTrayLook(at.id, { name: draft.current.trim() })
+    draft.current = null
+  }
+  useEffect(() => saveName, [])
   const turn = [
     { label: 'Turn', keys: 'Space', run: () => engine.rotateSelection(1), off: empty },
     { label: 'Turn as one', keys: 'Shift + Space', run: () => engine.rotateSelection(1, true), off: empty },
@@ -50,7 +65,12 @@ export default function ContextMenu({ engine, at, onClose }) {
 
   useEffect(() => {
     const away = (e) => !ref.current?.contains(e.target) && onClose()
-    const key = (e) => e.key === 'Escape' && (e.stopImmediatePropagation(), onClose())
+    const key = (e) => {
+      if (e.key !== 'Escape') return
+      if (e.target === nameRef.current) draft.current = null
+      e.stopImmediatePropagation()
+      onClose()
+    }
     window.addEventListener('pointerdown', away, true)
     window.addEventListener('keydown', key, true)
     window.addEventListener('wheel', onClose, true)
@@ -65,6 +85,40 @@ export default function ContextMenu({ engine, at, onClose }) {
 
   return (
     <div ref={ref} className="context-menu" role="menu" style={{ left: pos.left + r.left, top: pos.top + r.top }} onContextMenu={(e) => e.preventDefault()}>
+      {tray && (
+        <div className="tray-look">
+          <TextField
+            ref={nameRef}
+            compact
+            value={name}
+            maxLength={40}
+            placeholder="Name this tray"
+            aria-label="Tray name"
+            onChange={(e) => {
+              setName(e.target.value)
+              draft.current = e.target.value
+            }}
+            onBlur={saveName}
+            onKeyDown={(e) => e.key === 'Enter' && onClose()}
+          />
+          <div className="tray-colors" role="radiogroup" aria-label="Tray colour">
+            {Object.entries(TRAY_COLORS).map(([key, hex]) => (
+              <button
+                key={key}
+                role="radio"
+                aria-checked={color === key}
+                aria-label={key}
+                title={key[0].toUpperCase() + key.slice(1)}
+                style={{ '--c': hex }}
+                onClick={() => {
+                  setColor(key)
+                  engine.setTrayLook(at.id, { color: key })
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
       {items.map((it) => (
         <button
           key={it.label}
