@@ -228,6 +228,8 @@ export class Engine {
     // What other players have selected or hover over: client -> { sel, hl } (piece ids), outlined in
     // their cursor colour. Ours go out the same way, throttled, see sendMarks().
     this.marks = new Map()
+    // The player on each other client, as their cursor and marks say, so a player keeps one colour.
+    this.players = new Map()
     this.lastMarks = 0
     // Pieces other players carry are lifted with a shadow like ours: client -> { ids, set, value, target }.
     this.rlift = new Map()
@@ -2079,7 +2081,7 @@ export class Engine {
   markedBy(key) {
     const out = new Map()
     for (const [c, m] of this.marks) {
-      const color = cursorColor(c)
+      const color = this.colorOf(c)
       const ids = key === 'tray' ? [m.tray] : m[key]
       for (const id of ids) if (id && !out.has(id)) out.set(id, color)
     }
@@ -2107,7 +2109,7 @@ export class Engine {
       const hl = this.hl && !this.drag ? this.hl.ids : []
       const refs = new Set(this.selRefs)
       if (this.refSel) refs.add(this.refSel)
-      this.send({ type: 'marks', sel: [...this.sel], hl, refs: [...refs], notes: [...this.selNotes], tray: this.traySel })
+      this.send({ type: 'marks', sel: [...this.sel], hl, refs: [...refs], notes: [...this.selNotes], tray: this.traySel, player: this.user || '' })
     } else {
       this.marksTimer = setTimeout(() => this.sendMarks(true), MARKS_MS - (now - this.lastMarks))
     }
@@ -2133,7 +2135,7 @@ export class Engine {
       // While dragging out a selection box, its corners go along (in world units).
       const m = this.marquee
       const box = m && Math.abs(m.sx - m.sx0) + Math.abs(m.sy - m.sy0) > 2 ? [...this.toWorld(m.sx0, m.sy0), ...this.toWorld(m.sx, m.sy)].map(r2) : undefined
-      this.send({ type: 'cursor', x: r2(x), y: r2(y), name: this.userName || '', box })
+      this.send({ type: 'cursor', x: r2(x), y: r2(y), name: this.userName || '', player: this.user || '', box })
     } else {
       this.cursorTimer = setTimeout(() => this.sendCursor(true), CURSOR_MS - (now - this.lastCursor))
     }
@@ -2440,6 +2442,7 @@ export class Engine {
       if (rl) rl.target = 0
       this.applyRemote(msg.pieces, msg.turns, { client: msg.client, trace })
     } else if (msg.type === 'marks') {
+      this.learnPlayer(msg)
       const ok = (a) => (Array.isArray(a) ? a.filter((i) => Number.isInteger(i) && i >= 0 && i < this.n) : [])
       const names = (a) => (Array.isArray(a) ? a.filter((x) => typeof x === 'string').slice(0, 500) : [])
       const m = { sel: ok(msg.sel), hl: ok(msg.hl), refs: names(msg.refs), notes: names(msg.notes), tray: typeof msg.tray === 'string' ? msg.tray : null }
@@ -2448,6 +2451,7 @@ export class Engine {
       this.markNotes()
       this.invalidate()
     } else if (msg.type === 'cursor') {
+      this.learnPlayer(msg)
       if (msg.hide) this.cursors.delete(msg.client)
       else if (isFinite(msg.x) && isFinite(msg.y)) {
         const c = this.cursors.get(msg.client)
@@ -2455,7 +2459,7 @@ export class Engine {
         const box = Array.isArray(msg.box) && msg.box.length === 4 && msg.box.every(isFinite) ? msg.box : null
         if (c) Object.assign(c, { tx: msg.x, ty: msg.y, name, t: now, box })
         else {
-          const color = cursorColor(msg.client)
+          const color = this.colorOf(msg.client)
           this.cursors.set(msg.client, { x: msg.x, y: msg.y, tx: msg.x, ty: msg.y, name, color, t: now, box })
         }
       }
@@ -2463,6 +2467,7 @@ export class Engine {
     } else if (msg.type === 'gone') {
       this.cursors.delete(msg.client)
       this.marks.delete(msg.client)
+      this.players.delete(msg.client)
       this.traces.delete(msg.client)
       this.rlift.delete(msg.client)
       this.markNotes()
@@ -2470,6 +2475,19 @@ export class Engine {
       if (d) for (const i of d.ids) this.held.delete(i)
       this.remote.delete(msg.client)
     }
+  }
+
+  // Remembers which player is on a client (msg.player), and gives their cursor that player's colour.
+  learnPlayer(msg) {
+    if (typeof msg.player !== 'string' || !msg.player || this.players.get(msg.client) === msg.player) return
+    this.players.set(msg.client, msg.player.slice(0, 64))
+    const c = this.cursors.get(msg.client)
+    if (c) c.color = this.colorOf(msg.client)
+  }
+
+  // A client's colour: its player's, so it stays the same across tabs and reloads, or its own for a guest.
+  colorOf(client) {
+    return cursorColor(this.players.get(client) || client)
   }
 
   remoteLive(d, px, py, k, now) {
@@ -3385,13 +3403,17 @@ export class Engine {
       }
     }
     lift[1] = this.gn - lift[0]
-    // The outlined pieces as they lie, and the box around them on the screen.
+    // How much each piece another player carries is grown, so outlines around it fit.
+    const grown = new Map()
+    for (const rl of this.rlift.values()) for (const i of rl.ids) grown.set(i, 1 + 0.045 * rl.value)
+    // The outlined pieces as they lie, as big as they're drawn, and the box around them on the screen.
     const outlined = (ids, box) => {
       const first = this.gn
-      const e = R * z
       for (const i of ids) {
+        const s = grown.get(i) || 1
+        const e = R * s * z
         this.poseInto(i)
-        if (!seen(this.qx, this.qy, R) || !this.gpuPiece(i, this.qx, this.qy, this.qa, 1, v)) continue
+        if (!seen(this.qx, this.qy, R * s) || !this.gpuPiece(i, this.qx, this.qy, this.qa, s, v)) continue
         const X = sx(this.qx)
         const Y = sy(this.qy)
         box[0] = Math.min(box[0], X - e)
@@ -3406,16 +3428,40 @@ export class Engine {
     const carried = this.drag && lifted
     const sel = this.sel.size ? outlined(carried ? [...this.sel].filter((i) => !carried.has(i)) : this.sel, selBox) : [0, 0]
     const hlBox = [Infinity, Infinity, -Infinity, -Infinity]
-    const hl = this.hl && !this.drag ? outlined(this.hl.ids, hlBox) : [0, 0]
-    // What other players hold, select or hover over, each in their cursor colour.
+    let hl = this.hl && !this.drag ? outlined(this.hl.ids, hlBox) : [0, 0]
+    // The pieces we carry are outlined too, as they're drawn, lifted, over everything. There is no
+    // hover while carrying, so they take its place.
+    if (this.drag && this.lift) {
+      hl = [this.gn, 0]
+      this.liftPoses((i, x, y, a, s) => {
+        if (!seen(x, y, R * s) || !this.gpuPiece(i, x, y, a, s, v)) return
+        const e = R * s * z
+        hlBox[0] = Math.min(hlBox[0], sx(x) - e)
+        hlBox[1] = Math.min(hlBox[1], sy(y) - e)
+        hlBox[2] = Math.max(hlBox[2], sx(x) + e)
+        hlBox[3] = Math.max(hlBox[3], sy(y) + e)
+      })
+      hl[1] = this.gn - hl[0]
+    }
+    // What other players hold, select or hover over, each in their cursor colour. What they carry is
+    // outlined as it's drawn, lifted, over everything, like ours.
     const extra = []
     for (const c of new Set([...this.marks.keys(), ...this.remote.keys()])) {
       if (extra.length >= MAX_OUTLINES) break
       const m = this.marks.get(c)
-      const ids = new Set([...(m?.sel || []), ...(m?.hl || []), ...(this.remote.get(c)?.ids || [])])
-      if (!ids.size) continue
-      const box = [Infinity, Infinity, -Infinity, -Infinity]
-      extra.push({ range: outlined(ids, box), box, color: rgba(cursorColor(c)) })
+      const rl = this.rlift.get(c)
+      const up = new Set(rl?.target ? rl.ids.filter((i) => !lifted?.has(i)) : [])
+      // Pieces we carry are left out: they're outlined in our colour, where we hold them.
+      const ids = new Set([...(m?.sel || []), ...(m?.hl || []), ...(this.remote.get(c)?.ids || [])].filter((i) => !up.has(i) && !lifted?.has(i)))
+      const color = rgba(this.colorOf(c))
+      if (ids.size) {
+        const box = [Infinity, Infinity, -Infinity, -Infinity]
+        extra.push({ range: outlined(ids, box), box, color })
+      }
+      if (up.size) {
+        const box = [Infinity, Infinity, -Infinity, -Infinity]
+        extra.push({ range: outlined(up, box), box, color, over: true })
+      }
     }
 
     let sp = this.geo.S
@@ -3440,8 +3486,9 @@ export class Engine {
       hlBox,
       extra,
       selColor: rgba(this.colors.sel),
-      hlColor: rgba(this.colors.line || '#000'),
-      outline: [2.5 * dpr, 0.75 * dpr],
+      hlColor: rgba(this.drag ? this.colors.sel : this.colors.line || '#000'),
+      hlOver: !!this.drag,
+      outline: [2.5 * dpr, 0.5 * dpr],
       selUnder: !!this.drag,
       shadow: l && { color: rgba(this.colors.shadow), blur: (4 + 26 * l.value) * dpr, ox: (1 + 7 * l.value) * dpr, oy: (2 + 16 * l.value) * dpr },
     })

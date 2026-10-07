@@ -2,6 +2,9 @@
 
 ## 7 October 2026
 
+- The outline around selected pieces is smoother: it's the same thickness all the way round and follows the piece's shape closely, without a gap. It's blue for your own selection and in the other player's colour for theirs, and pieces being carried keep their outline too, on your screen and everyone else's.
+- When another player picks up a piece you have selected or are pointing at, the outline now moves with the piece instead of getting stuck where it was or not fitting it.
+- Each player now keeps the same colour for their cursor and outlines, instead of getting a new one every time they reload the page or open another tab.
 - Notes have a new look that matches the rest of the table: a plain card in the light or dark theme instead of a yellow sticky note. They are also narrower.
 - Text in a note stays the same size however much you write. The note grows taller to fit it, instead of the text shrinking.
 - Notes have the same **⋯** button as trays and images, on their top right corner, opening the note's menu.

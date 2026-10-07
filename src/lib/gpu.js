@@ -162,7 +162,7 @@ struct O {
 }
 // The piece's shape: its sprite is opaque inside the outline and at most a faint shadow outside it.
 @fragment fn fsMask(i: O) -> @location(0) vec4f {
-  return vec4f(smoothstep(0.5, 0.85, textureSample(atlas, samp, i.uv, i.layer).a));
+  return vec4f(smoothstep(0.4, 0.75, textureSample(atlas, samp, i.uv, i.layer).a));
 }
 @fragment fn fsShadow(i: O) -> @location(0) vec4f {
   return vec4f(textureSample(atlas, samp, i.uv, i.layer).a);
@@ -204,14 +204,22 @@ fn mask(p: vec2f) -> f32 {
 }
 
 // a: colour; b: which channel of the mask; c: outline width and the cut out's growth (device pixels).
+// The mask is grown by the width: the most of it anywhere within a disc that wide, sampled in rings
+// that fill the disc, so the outline is as thick everywhere and hugs corners. The mask's soft edge
+// keeps the outline's edges smooth.
 @fragment fn fsOutline(@builtin(position) p: vec4f) -> @location(0) vec4f {
   let m0 = mask(p.xy);
   var grown = m0;
-  var cut = m0;
-  for (var k = 0; k < 12; k++) {
-    let a = f32(k) * 0.5235988;
-    grown = max(grown, mask(p.xy + vec2f(cos(a), sin(a)) * pu.c.x));
+  for (var ring = 1; ring <= 4; ring++) {
+    let rr = pu.c.x * f32(ring) / 4.0;
+    let n = 6 * ring + 4;
+    let turn = 0.5 * f32(ring % 2);
+    for (var k = 0; k < n; k++) {
+      let a = (f32(k) + turn) * 6.2831853 / f32(n);
+      grown = max(grown, mask(p.xy + vec2f(cos(a), sin(a)) * rr));
+    }
   }
+  var cut = m0;
   for (var k = 0; k < 8; k++) {
     let a = f32(k) * 0.7853982;
     cut = max(cut, mask(p.xy + vec2f(cos(a), sin(a)) * pu.c.y));
@@ -490,7 +498,8 @@ class Gpu {
   //   trays, refs: { data, count }; pieces: { data, count }, with ranges [first, count] in seg:
   //   still and lift (drawn in that order), sel and hl (outlined); selBox, hlBox: the
   //   outlined pieces' box [x0, y0, x1, y1] in device pixels; selColor, hlColor; outline: [width,
-  //   cut]; extra: more outlines, [{ range: [first, count], box, color }]; selUnder: the selection outline goes under the lifted pieces; shadow:
+  //   cut]; extra: more outlines, [{ range: [first, count], box, color, over }], over the lifted pieces when over; selUnder: the selection outline goes under the lifted pieces; hlOver: the hover outline (the
+  //   carried pieces' then) goes over them; shadow:
   //   { color, blur, ox, oy } in device pixels, or null }
   frame(f) {
     const d = this.device
@@ -634,8 +643,8 @@ class Gpu {
     }
     if (seg.trayed) piecesOf(seg.trayed)
     if (sel && f.selUnder) outline(this.gSel, f.selBox)
-    if (hl) outline(this.gHl, f.hlBox)
-    extras.forEach((e, k) => outline(masks[k].group, e.box))
+    if (hl && !f.hlOver) outline(this.gHl, f.hlBox)
+    extras.forEach((e, k) => !e.over && outline(masks[k].group, e.box))
     if (sh) {
       pass.setPipeline(this.pipes.shadow)
       pass.setBindGroup(1, this.gShadow)
@@ -643,6 +652,8 @@ class Gpu {
     }
     piecesOf(seg.lift)
     if (sel && !f.selUnder) outline(this.gSel, f.selBox)
+    if (hl && f.hlOver) outline(this.gHl, f.hlBox)
+    extras.forEach((e, k) => e.over && outline(masks[k].group, e.box))
     pass.end()
     d.queue.submit([enc.finish()])
   }
