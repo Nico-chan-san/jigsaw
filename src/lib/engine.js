@@ -3386,8 +3386,12 @@ export class Engine {
     }
     const trayed = [still[1], this.gn - still[1]]
     const lift = [this.gn, 0]
+    // Lifted pieces (ours and others'), as they're drawn: id -> [x, y, angle, scale]. Outlines use
+    // these, so they fit the pieces while they're lifted, carried and put down again.
+    const drawn = new Map()
     if (this.lift) {
       this.liftPoses((i, x, y, a, s) => {
+        drawn.set(i, [x, y, a, s])
         if (seen(x, y, R * s)) this.gpuPiece(i, x, y, a, s, v)
       })
     }
@@ -3399,23 +3403,25 @@ export class Engine {
       for (const i of rl.ids) {
         if (lifted?.has(i)) continue
         this.poseInto(i)
+        drawn.set(i, [this.qx, this.qy, this.qa, s])
         if (seen(this.qx, this.qy, R * s)) this.gpuPiece(i, this.qx, this.qy, this.qa, s, v)
       }
     }
     lift[1] = this.gn - lift[0]
-    // How much each piece another player carries is grown, so outlines around it fit.
-    const grown = new Map()
-    for (const rl of this.rlift.values()) for (const i of rl.ids) grown.set(i, 1 + 0.045 * rl.value)
-    // The outlined pieces as they lie, as big as they're drawn, and the box around them on the screen.
+    // The outlined pieces exactly as they're drawn, and the box around them on the screen.
     const outlined = (ids, box) => {
       const first = this.gn
       for (const i of ids) {
-        const s = grown.get(i) || 1
+        let p = drawn.get(i)
+        if (!p) {
+          this.poseInto(i)
+          p = [this.qx, this.qy, this.qa, 1]
+        }
+        const [x, y, a, s] = p
         const e = R * s * z
-        this.poseInto(i)
-        if (!seen(this.qx, this.qy, R * s) || !this.gpuPiece(i, this.qx, this.qy, this.qa, s, v)) continue
-        const X = sx(this.qx)
-        const Y = sy(this.qy)
+        if (!seen(x, y, R * s) || !this.gpuPiece(i, x, y, a, s, v)) continue
+        const X = sx(x)
+        const Y = sy(y)
         box[0] = Math.min(box[0], X - e)
         box[1] = Math.min(box[1], Y - e)
         box[2] = Math.max(box[2], X + e)
@@ -3428,21 +3434,11 @@ export class Engine {
     const carried = this.drag && lifted
     const sel = this.sel.size ? outlined(carried ? [...this.sel].filter((i) => !carried.has(i)) : this.sel, selBox) : [0, 0]
     const hlBox = [Infinity, Infinity, -Infinity, -Infinity]
-    let hl = this.hl && !this.drag ? outlined(this.hl.ids, hlBox) : [0, 0]
-    // The pieces we carry are outlined too, as they're drawn, lifted, over everything. There is no
-    // hover while carrying, so they take its place.
-    if (this.drag && this.lift) {
-      hl = [this.gn, 0]
-      this.liftPoses((i, x, y, a, s) => {
-        if (!seen(x, y, R * s) || !this.gpuPiece(i, x, y, a, s, v)) return
-        const e = R * s * z
-        hlBox[0] = Math.min(hlBox[0], sx(x) - e)
-        hlBox[1] = Math.min(hlBox[1], sy(y) - e)
-        hlBox[2] = Math.max(hlBox[2], sx(x) + e)
-        hlBox[3] = Math.max(hlBox[3], sy(y) + e)
-      })
-      hl[1] = this.gn - hl[0]
-    }
+    // The hover outline leaves out selected pieces, which have the selection's.
+    const hover = this.hl && !this.drag ? this.hl.ids.filter((i) => !this.sel.has(i)) : []
+    // The pieces we carry are outlined too, over everything. There is no hover while carrying, so
+    // they take its place.
+    const hl = this.drag && this.lift ? outlined(this.lift.ids, hlBox) : hover.length ? outlined(hover, hlBox) : [0, 0]
     // What other players hold, select or hover over, each in their cursor colour. What they carry is
     // outlined as it's drawn, lifted, over everything, like ours.
     const extra = []
