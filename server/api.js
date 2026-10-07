@@ -206,11 +206,11 @@ function createApi(dbFile) {
       INSERT INTO times (room_id, user, seen) VALUES (?, ?, ?)
       ON CONFLICT (room_id, user) DO UPDATE SET seen = excluded.seen`),
     deleteTimes: db.prepare('DELETE FROM times WHERE room_id = ?'),
-    refs: db.prepare('SELECT id, x, y, w, author, created FROM refs WHERE room_id = ? ORDER BY created'),
+    refs: db.prepare('SELECT id, x, y, w, opacity, author, created FROM refs WHERE room_id = ? ORDER BY created'),
     upsertRef: db.prepare(`
-      INSERT INTO refs (id, room_id, x, y, w, author, created) VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT (room_id, id) DO UPDATE SET x = excluded.x, y = excluded.y, w = excluded.w`),
-    ref: db.prepare('SELECT id, x, y, w, author, created FROM refs WHERE room_id = ? AND id = ?'),
+      INSERT INTO refs (id, room_id, x, y, w, opacity, author, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (room_id, id) DO UPDATE SET x = excluded.x, y = excluded.y, w = excluded.w, opacity = excluded.opacity`),
+    ref: db.prepare('SELECT id, x, y, w, opacity, author, created FROM refs WHERE room_id = ? AND id = ?'),
     deleteRef: db.prepare('DELETE FROM refs WHERE room_id = ? AND id = ?'),
     deleteRefs: db.prepare('DELETE FROM refs WHERE room_id = ?'),
     trays: db.prepare(
@@ -379,6 +379,7 @@ function createApi(dbFile) {
     x: +b?.x || 0,
     y: +b?.y || 0,
     w: Math.max(1, +b?.w || 0),
+    opacity: Math.min(1, Math.max(0.1, +b?.opacity || 1)),
     author: String(b?.author || '').slice(0, 32),
   })
 
@@ -413,7 +414,7 @@ function createApi(dbFile) {
     if (!r.id) return null
     if (live) return { ...r, created: +b.created || 0 }
     r.author = playerId(r.author) || ''
-    q.upsertRef.run(r.id, roomId, r.x, r.y, r.w, r.author, Date.now())
+    q.upsertRef.run(r.id, roomId, r.x, r.y, r.w, r.opacity, r.author, Date.now())
     return q.ref.get(roomId, r.id)
   }
 

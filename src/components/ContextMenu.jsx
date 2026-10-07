@@ -3,18 +3,13 @@ import TextField from './TextField.jsx'
 import { TRAY_COLORS } from '../lib/engine.js'
 
 // The right click menu on a piece, tray, image or note: its actions with their shortcuts. A tray's
-// menu starts with its name and colour.
+// menu starts with its name and colour, an image's with its opacity.
 export default function ContextMenu({ engine, at, onClose }) {
   const ref = useRef(null)
   const nameRef = useRef(null)
   const [pos, setPos] = useState({ left: at.x, top: at.y })
   const r = engine.canvas.getBoundingClientRect()
 
-  const deselect = () => {
-    engine.setSelection(new Set())
-    engine.selectRef(null)
-    engine.selectTray(null)
-  }
   const tray = at.kind === 'tray' && engine.trays.find((t) => t.id === at.id)
   const empty = at.kind === 'tray' && !tray?.pieces.length
   const [name, setName] = useState(tray?.name || '')
@@ -27,7 +22,22 @@ export default function ContextMenu({ engine, at, onClose }) {
     engine.setTrayLook(at.id, { name: draft.current.trim() })
     draft.current = null
   }
-  useEffect(() => saveName, [])
+  const image = at.kind === 'ref' && engine.refs.find((r) => r.id === at.id)
+  const [opacity, setOpacity] = useState(image?.opacity ?? 1)
+  // The opacity being slid to, saved when the slider is let go or the menu closes; null once saved.
+  const fade = useRef(null)
+  const saveOpacity = () => {
+    if (fade.current === null) return
+    engine.setRefOpacity(at.id, fade.current)
+    fade.current = null
+  }
+  useEffect(
+    () => () => {
+      saveName()
+      saveOpacity()
+    },
+    [],
+  )
   const turn = [
     { label: 'Turn', keys: 'Space', run: () => engine.rotateSelection(1), off: empty },
     { label: 'Turn as one', keys: 'Shift + Space', run: () => engine.rotateSelection(1, true), off: empty },
@@ -35,7 +45,6 @@ export default function ContextMenu({ engine, at, onClose }) {
     { label: 'Sort in random order', keys: 'Shift + G', run: () => engine.sortSelection(true), off: empty },
   ]
   const remove = (label) => ({ label, keys: 'Del', run: () => engine.removeSelected() })
-  const end = { label: 'Deselect', keys: 'Esc', run: deselect }
   const items =
     at.kind === 'piece'
       ? [
@@ -45,13 +54,12 @@ export default function ContextMenu({ engine, at, onClose }) {
             .sort((a, b) => a.num - b.num)
             .map((t) => ({ label: `Send to tray ${t.num}`, keys: String(t.num), run: () => engine.sendToTray(t.num) })),
           { label: 'Select all', keys: 'Ctrl + A', run: () => engine.selectAll() },
-          end,
         ]
       : at.kind === 'tray'
-        ? [...turn, { label: 'Auto sort', keys: tray?.auto ? 'On' : 'Off', run: () => engine.setTrayAuto(at.id, !tray?.auto) }, remove('Remove tray'), end]
+        ? [...turn, { label: 'Auto sort', keys: tray?.auto ? 'On' : 'Off', run: () => engine.setTrayAuto(at.id, !tray?.auto) }, remove('Remove tray')]
         : at.kind === 'ref'
-          ? [remove('Remove image'), end]
-          : [remove('Remove note'), end]
+          ? [remove('Remove image')]
+          : [remove('Remove note')]
 
   // Keep the menu on screen.
   useLayoutEffect(() => {
@@ -86,7 +94,7 @@ export default function ContextMenu({ engine, at, onClose }) {
   return (
     <div ref={ref} className="context-menu" role="menu" style={{ left: pos.left + r.left, top: pos.top + r.top }} onContextMenu={(e) => e.preventDefault()}>
       {tray && (
-        <div className="tray-look">
+        <div className="menu-look tray-look">
           <TextField
             ref={nameRef}
             compact
@@ -118,6 +126,29 @@ export default function ContextMenu({ engine, at, onClose }) {
             ))}
           </div>
         </div>
+      )}
+      {image && (
+        <label className="menu-look ref-look">
+          <span>Opacity</span>
+          <input
+            type="range"
+            min={10}
+            max={100}
+            step={5}
+            value={Math.round(opacity * 100)}
+            aria-label="Image opacity"
+            onChange={(e) => {
+              const v = e.target.value / 100
+              setOpacity(v)
+              fade.current = v
+              engine.setRefOpacity(at.id, v, true)
+            }}
+            onPointerUp={saveOpacity}
+            onKeyUp={saveOpacity}
+            onBlur={saveOpacity}
+          />
+          <span className="ref-pct">{Math.round(opacity * 100)}%</span>
+        </label>
       )}
       {items.map((it) => (
         <button

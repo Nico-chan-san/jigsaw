@@ -4,6 +4,12 @@
 
 - Trays have a new **⋯** button in their top right corner, next to the auto sort switch. It opens the tray's menu, the same one you get by right clicking the tray.
 - You can now name a tray and change its colour from its menu. The name shows quietly along the top of the tray, and hovering a name that is cut short shows it in full. Everyone in the room sees the change, and it can be undone.
+- Images have the same **⋯** button in their top right corner, opening the image's menu.
+- Images can be made see-through with the new opacity slider in their menu. Everyone in the room sees the change, and it can be undone.
+- Hold **Shift** and drag an image to resize it from its nearest corner, without having to grab the corner itself. A shift click still adds the image to the selection.
+- Hold **Alt** and drag an image left or right to make it fainter or more solid.
+- The right click menus no longer have a **Deselect** item. Press Esc or click the table instead.
+- The changelog is wider, so it's easier to read.
 - When zoomed far out, a tray's number and buttons now hide once they no longer fit inside it.
 - Moving an empty tray, or images and notes as part of a selection, now saves where you put them. Before, they could jump back after reloading the page, and undo skipped the move.
 - When you join pieces, the piece you were holding decides the tray. Joining a piece from a tray to a group on the table takes it out of the tray, even if you let go close to the tray. Joining a group to a piece in a tray puts the whole group in that tray.

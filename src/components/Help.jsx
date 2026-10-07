@@ -42,6 +42,8 @@ const SECTIONS = [
       [<Key key="lt">Drag the table</Key>, 'Select'],
       [<Key key="tr">Drag a tray</Key>, 'Move it, with the pieces in it'],
       [<Key key="tc">Click a tray</Key>, 'Select it: space, G and Delete then work on it'],
+      [<Combo key="ir" keys={['Shift', 'Drag an image']} />, 'Resize it from the nearest corner'],
+      [<Combo key="ia" keys={['Alt', 'Drag an image']} />, 'Make it fainter (left) or more solid (right)'],
       [<Key key="nc">Double click a note</Key>, 'Write in it (a single click selects it)'],
       [<Key key="r">Right drag</Key>, 'Pan the screen'],
       [<Key key="rc">Right click while dragging</Key>, 'Rotate held pieces'],

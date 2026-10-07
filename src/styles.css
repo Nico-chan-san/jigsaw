@@ -1492,7 +1492,7 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 /* ---- changelog ---- */
 
 .modal.changelog {
-  width: min(560px, 100%);
+  width: min(760px, 100%);
 }
 .changelog-body {
   gap: 24px;
@@ -2162,13 +2162,22 @@ button.link:hover {
   color: var(--muted);
   font: 600 11px/1 ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
-/* A tray's name and colour, at the top of its menu. */
-.context-menu .tray-look {
+/* A tray's name and colour, or an image's opacity, at the top of its menu. */
+.context-menu .menu-look {
   display: grid;
   gap: 10px;
   margin-bottom: 4px;
   padding: 6px 6px 10px;
   border-bottom: 1px solid var(--line);
+}
+.context-menu .ref-look {
+  grid-template-columns: auto 1fr 3.5ch;
+  align-items: center;
+}
+.context-menu .ref-pct {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 .context-menu .tray-colors {
   display: flex;

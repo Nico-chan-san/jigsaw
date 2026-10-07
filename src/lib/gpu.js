@@ -12,7 +12,7 @@
 // Positions reach the GPU in device pixels, worked out on the CPU, so the shaders don't need the camera.
 
 // Floats per instance: pieces [m00 m01 m10 m11 x y cell -], trays [rect fill stroke (radius width - -)],
-// images [rect border (width - - -)].
+// images [rect border (width opacity - -)].
 export const PIECE_FLOATS = 8
 export const TRAY_FLOATS = 16
 export const REF_FLOATS = 12
@@ -113,6 +113,7 @@ struct O {
   @location(2) @interpolate(flat) hs: vec2f,
   @location(3) @interpolate(flat) border: vec4f,
   @location(4) @interpolate(flat) bw: f32,
+  @location(5) @interpolate(flat) op: f32,
 }
 @vertex fn vs(@builtin(vertex_index) vi: u32, @location(0) rect: vec4f, @location(1) border: vec4f,
               @location(2) prm: vec4f) -> O {
@@ -125,11 +126,12 @@ struct O {
   o.hs = (rect.zw - rect.xy) * 0.5;
   o.border = border;
   o.bw = prm.x;
+  o.op = prm.y;
   return o;
 }
 @fragment fn fs(i: O) -> @location(0) vec4f {
   let s = box(i.d, i.hs, 0.0);
-  let img = textureSample(tex, samp, clamp(i.uv, vec2f(0.0), vec2f(1.0))) * clamp(0.5 - s, 0.0, 1.0);
+  let img = textureSample(tex, samp, clamp(i.uv, vec2f(0.0), vec2f(1.0))) * clamp(0.5 - s, 0.0, 1.0) * i.op;
   let k = clamp(i.bw * 0.5 + 0.5 - abs(s), 0.0, 1.0);
   return i.border * k + img * (1.0 - i.border.a * k);
 }

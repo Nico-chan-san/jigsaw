@@ -41,6 +41,8 @@ export const TRAY_COLORS = {
 const TABLE = 10
 // How far a press may move and still count as a click.
 const CLICK_PX = 5
+// How far (screen px) an alt drag on an image goes from faintest to solid.
+const REF_FADE_PX = 300
 // Screen-space size of reference image handles.
 const HANDLE = 7
 // Cursor updates are throttled to this interval (ms); idle cursors vanish after CURSOR_IDLE.
@@ -252,6 +254,10 @@ export class Engine {
     this.refs = (refs || []).filter((r) => isFinite(r.x) && isFinite(r.y) && r.w > 0)
     this.refSel = null
     this.refDrag = null
+    // A shift press on an image, until it turns out to be a click or a resize: { rh, pointer, sx0, sy0 }.
+    this.refShift = null
+    // An alt drag on an image, changing its opacity: { ref, pointer, sx0, op0, moved }.
+    this.refFade = null
 
     // Trays, shared by the room: { id, x, y, w, h, color, pieces, author } in world units, x and y
     // being the top left corner. pieces lists the pieces in it, which it fits itself around. The last
@@ -960,6 +966,8 @@ export class Engine {
       this.pan = null
       this.marquee = null
       this.refDrag = null
+      this.refShift = null
+      this.refFade = null
       this.pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), m: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }
       this.invalidate()
       return
@@ -971,6 +979,12 @@ export class Engine {
       if (b) {
         const [x0, , , y1] = this.trayButtons(b.tray).menu
         return this.openMenu({ kind: 'tray', id: b.tray.id, sx: x0, sy: y1 + 4 })
+      }
+      // An image's menu button, the same way.
+      const ref = this.refButtonAt(sx, sy)
+      if (ref) {
+        const [x0, , , y1] = this.refButton(ref)
+        return this.openMenu({ kind: 'ref', id: ref.id, sx: x0, sy: y1 + 4 })
       }
     }
     // Right (or middle) button drags the table, as does any press in view mode.
@@ -1018,9 +1032,24 @@ export class Engine {
       if (this.drag) this.drag.piece = i
       return
     }
+    // Alt drag on an image: sideways changes its opacity, fainter to the left.
+    if (rh?.mode === 'move' && e.altKey) {
+      e.preventDefault()
+      if (this.guard && !this.guard()) return
+      this.selectRef(rh.ref.id)
+      this.refFade = { ref: rh.ref, pointer: e.pointerId, sx0: sx, op0: rh.ref.opacity ?? 1, moved: false }
+      this.canvas.style.cursor = 'ew-resize'
+      return
+    }
+    // Shift on an image: a click adds it to the selection or takes it out, a drag resizes it from the
+    // corner nearest the pointer.
     if (rh?.mode === 'move' && e.shiftKey) {
       if (this.guard && !this.guard()) return
-      return this.toggleRef(rh.ref.id)
+      const [x0, y0, x1, y1] = this.refRect(rh.ref)
+      const cx = sx > (x0 + x1) / 2 ? 1 : 0
+      const cy = sy > (y0 + y1) / 2 ? 1 : 0
+      this.refShift = { rh: { ref: rh.ref, mode: 'resize', cx, cy }, pointer: e.pointerId, sx0: sx, sy0: sy }
+      return
     }
     if (rh?.mode === 'move' && this.selRefs.has(rh.ref.id) && this.selCount > 1) {
       if (this.guard && !this.guard()) return
@@ -1145,6 +1174,26 @@ export class Engine {
       this.updateMarquee()
       return
     }
+    const rf = this.refFade
+    if (rf && e.pointerId === rf.pointer) {
+      rf.moved = true
+      this.setRefOpacity(rf.ref.id, rf.op0 + (sx - rf.sx0) / REF_FADE_PX, true)
+      return
+    }
+    const rs = this.refShift
+    if (rs && e.pointerId === rs.pointer) {
+      if (Math.hypot(sx - rs.sx0, sy - rs.sy0) <= CLICK_PX) return
+      this.refShift = null
+      this.startRefDrag(rs.rh, rs.pointer, ...this.toWorld(sx, sy))
+      // The corner keeps its distance from the pointer, rather than jumping to it.
+      const d = this.refDrag
+      if (d) {
+        const [w, h] = this.refSize(d.ref)
+        const [px, py] = this.toWorld(rs.sx0, rs.sy0)
+        d.ox = d.ref.x + (d.sx * w) / 2 - px
+        d.oy = d.ref.y + (d.sy * h) / 2 - py
+      }
+    }
     if (this.refDrag && e.pointerId === this.refDrag.pointer) {
       this.moveRef(...this.toWorld(sx, sy))
       return
@@ -1172,6 +1221,16 @@ export class Engine {
       this.marquee = null
       this.sendCursor(true)
       this.invalidate()
+    }
+    if (this.refFade && e.pointerId === this.refFade.pointer) {
+      const { ref, moved } = this.refFade
+      this.refFade = null
+      if (moved) this.setRefOpacity(ref.id, ref.opacity)
+    }
+    if (this.refShift && e.pointerId === this.refShift.pointer) {
+      const { ref } = this.refShift.rh
+      this.refShift = null
+      if (this.refs.includes(ref)) this.toggleRef(ref.id)
     }
     if (this.refDrag && e.pointerId === this.refDrag.pointer) {
       const { ref } = this.refDrag
@@ -1309,6 +1368,11 @@ export class Engine {
             ? 'Auto sort is on: pieces put in this tray sort themselves'
             : 'Auto sort: sort the pieces put in this tray'
       return this.showTip({ text, sx, sy })
+    }
+    if (this.refButtonAt(sx, sy)) {
+      this.canvas.style.cursor = 'pointer'
+      this.setHighlight(null)
+      return this.showTip({ text: 'Image settings: opacity and more', sx, sy })
     }
     const { rh, th, i } = this.pick(sx, sy)
     // A tray name that was cut short shows in full.
@@ -2406,7 +2470,7 @@ export class Engine {
     const [x, y] = this.toWorld(sx, sy)
     // Fit comfortably in the current view.
     const w = Math.min(this.room.width, ((Math.min(this.vw, this.vh / this.refAspect) * 0.6) / this.cam.z))
-    const ref = { id: Math.random().toString(36).slice(2, 10), x, y, w, author: this.user || '' }
+    const ref = { id: Math.random().toString(36).slice(2, 10), x, y, w, opacity: 1, author: this.user || '' }
     this.refs.push(ref)
     this.selectRef(ref.id)
     this.onRef?.(ref, false)
@@ -2478,6 +2542,36 @@ export class Engine {
     this.invalidate()
   }
 
+  // The screen rectangle, [x0, y0, x1, y1], of an image's menu button inside its top right corner,
+  // clear of the resize handle there. Null when the image is too small on the screen to hold it.
+  refButton(ref) {
+    const tag = Math.max(14, this.geo.S * 0.4 * this.cam.z)
+    const gap = Math.max(tag * 0.3, HANDLE + 4)
+    const [x0, y0, x1, y1] = this.refRect(ref)
+    if (x1 - x0 < tag + gap * 2 || y1 - y0 < tag + gap * 2) return null
+    return [x1 - gap - tag, y0 + gap, x1 - gap, y0 + gap + tag]
+  }
+
+  // The image whose menu button is at a screen point, if any.
+  refButtonAt(sx, sy) {
+    for (let k = this.refs.length - 1; k >= 0; k--) {
+      const b = this.refButton(this.refs[k])
+      if (b && sx >= b[0] && sx <= b[2] && sy >= b[1] && sy <= b[3]) return this.refs[k]
+    }
+    return null
+  }
+
+  // Sets how see-through an image is (0.1 to 1), for everyone. live while the slider is dragged: shown
+  // and passed on, but only saved, and remembered for undo, once it is let go.
+  setRefOpacity(id, opacity, live = false) {
+    const ref = this.refs.find((r) => r.id === id)
+    if (!ref) return
+    if (this.guard && !this.guard()) return
+    ref.opacity = Math.min(1, Math.max(0.1, opacity))
+    this.onRef?.(ref, live)
+    this.invalidate()
+  }
+
   // Screen-space corners of a reference image: [x0, y0, x1, y1].
   refRect(ref) {
     const [w, h] = this.refSize(ref)
@@ -2542,7 +2636,7 @@ export class Engine {
     } else {
       const a = this.refAspect
       const min = this.geo.S
-      const w = Math.max(min, Math.max(d.sx * (wx - d.ax), (d.sy * (wy - d.ay)) / a))
+      const w = Math.max(min, Math.max(d.sx * (wx + (d.ox || 0) - d.ax), (d.sy * (wy + (d.oy || 0) - d.ay)) / a))
       ref.w = w
       ref.x = d.ax + (d.sx * w) / 2
       ref.y = d.ay + (d.sy * w * a) / 2
@@ -3154,7 +3248,7 @@ export class Engine {
       const on = this.selRefs.has(ref.id)
       const mark = !on && markedRefs.get(ref.id)
       const rect = [sx(ref.x - w / 2), sy(ref.y - h / 2), sx(ref.x + w / 2), sy(ref.y + h / 2)]
-      this.gRefs.set([...rect, ...pm(rgba(on ? this.colors.sel : mark || this.colors.dot)), (on || mark ? 3 : 1) * dpr, 0, 0, 0], refs++ * REF_FLOATS)
+      this.gRefs.set([...rect, ...pm(rgba(on ? this.colors.sel : mark || this.colors.dot)), (on || mark ? 3 : 1) * dpr, ref.opacity ?? 1, 0, 0], refs++ * REF_FLOATS)
     }
 
     const R = this.radius
@@ -3438,6 +3532,34 @@ export class Engine {
     ctx.shadowColor = 'transparent'
   }
 
+  // Each image's menu button: three dots on a chip in the table's colour, so it reads on any image.
+  drawRefButtons() {
+    const octx = this.octx
+    const { dpr, vw, vh } = this
+    const [br, bg, bb] = rgba(this.colors.bg)
+    const light = 0.2126 * br + 0.7152 * bg + 0.0722 * bb > 0.5
+    for (const ref of this.refs) {
+      const b = this.refButton(ref)
+      if (!b) continue
+      const [x0, y0, x1, y1] = b
+      if (x0 > vw || y0 > vh || x1 < 0 || y1 < 0) continue
+      const tag = x1 - x0
+      octx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      octx.beginPath()
+      octx.roundRect(x0, y0, tag, tag, tag * 0.3)
+      octx.globalAlpha = 0.85
+      octx.fillStyle = this.colors.bg
+      octx.fill()
+      octx.globalAlpha = 1
+      octx.fillStyle = light ? '#444' : '#ddd'
+      for (const k of [-1, 0, 1]) {
+        octx.beginPath()
+        octx.arc((x0 + x1) / 2 + k * tag * 0.22, (y0 + y1) / 2, tag * 0.07, 0, Math.PI * 2)
+        octx.fill()
+      }
+    }
+  }
+
   // A tray's number, name and buttons along its top edge, above the notes and trays. They scale with
   // the zoom like everything on the table, but never get too small to read.
   drawTrayTags() {
@@ -3543,7 +3665,8 @@ export class Engine {
       ctx.setTransform(1, 0, 0, 1, 0, 0)
       ctx.clearRect(0, 0, this.overlay.width, this.overlay.height)
     }
-    this.cursorsDrawn = this.cursors.size > 0 || this.trays.length > 0
+    this.cursorsDrawn = this.cursors.size > 0 || this.trays.length > 0 || this.refs.length > 0
+    this.drawRefButtons()
     this.drawTrayTags()
     if (!this.cursors.size) return
     this.paintCursors(ctx, this.cam, this.vw, this.vh)
