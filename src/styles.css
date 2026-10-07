@@ -2158,6 +2158,34 @@ button.link:hover {
 .context-menu button:not(:disabled):hover {
   background: var(--hover);
 }
+/* An item that opens a second menu beside it (see ContextMenu.jsx). */
+.context-menu button.open {
+  background: var(--hover);
+}
+.context-menu .sub-arrow {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+}
+.context-menu.sub-menu {
+  position: absolute;
+  min-width: 180px;
+  max-width: 280px;
+  max-height: calc(100dvh - 8px);
+  overflow-y: auto;
+  animation: sub-in 0.12s ease-out;
+}
+.context-menu .sub-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes sub-in {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+}
 .context-menu kbd {
   color: var(--muted);
   font: 600 11px/1 ui-sans-serif, system-ui, -apple-system, sans-serif;

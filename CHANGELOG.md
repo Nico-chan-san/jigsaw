@@ -9,6 +9,7 @@
 - Images can be made see-through with the new opacity slider in their menu. Everyone in the room sees the change, and it can be undone.
 - Hold **Shift** and drag an image to resize it from its nearest corner, without having to grab the corner itself. A shift click still adds the image to the selection.
 - Hold **Alt** and drag an image left or right to make it fainter or more solid.
+- The right click menu on pieces has a **Send to** item that opens a second menu with the trays to send them to: numbered trays first, like **Tray 1 (Edges)** when they have a name, then trays that only have a name.
 - The right click menus no longer have a **Deselect** item. Press Esc or click the table instead.
 - The changelog is wider, so it's easier to read.
 - When zoomed far out, a tray's number and buttons now hide once they no longer fit inside it.

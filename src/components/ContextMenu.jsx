@@ -3,11 +3,16 @@ import TextField from './TextField.jsx'
 import { TRAY_COLORS } from '../lib/engine.js'
 
 // The right click menu on a piece, tray, image or note: its actions with their shortcuts. A tray's
-// menu starts with its name and colour, an image's with its opacity.
+// menu starts with its name and colour, an image's with its opacity. An item with sub items opens
+// them in a second menu beside it.
 export default function ContextMenu({ engine, at, onClose }) {
   const ref = useRef(null)
   const nameRef = useRef(null)
+  const subRef = useRef(null)
   const [pos, setPos] = useState({ left: at.x, top: at.y })
+  // The item whose second menu is open, and where that menu goes.
+  const [open, setOpen] = useState(null)
+  const [subPos, setSubPos] = useState(null)
   const r = engine.canvas.getBoundingClientRect()
 
   const tray = at.kind === 'tray' && engine.trays.find((t) => t.id === at.id)
@@ -44,15 +49,23 @@ export default function ContextMenu({ engine, at, onClose }) {
     { label: 'Sort into a grid', keys: 'G', run: () => engine.sortSelection(), off: empty },
     { label: 'Sort in random order', keys: 'Shift + G', run: () => engine.sortSelection(true), off: empty },
   ]
+  // Trays to send pieces to: numbered ones first, by number, as "Tray 1 (name)" if they have a name,
+  // then the named ones without a number.
+  const trayName = (t) => t.name?.trim()
+  const sendTo = [
+    ...engine.trays.filter((t) => t.num).sort((a, b) => a.num - b.num),
+    ...engine.trays.filter((t) => !t.num && trayName(t)).sort((a, b) => trayName(a).localeCompare(trayName(b))),
+  ].map((t) => ({
+    label: t.num ? `Tray ${t.num}${trayName(t) ? ` (${trayName(t)})` : ''}` : trayName(t),
+    keys: t.num ? String(t.num) : '',
+    run: () => engine.sendToTray(t.id),
+  }))
   const remove = (label) => ({ label, keys: 'Del', run: () => engine.removeSelected() })
   const items =
     at.kind === 'piece'
       ? [
           ...turn,
-          ...engine.trays
-            .filter((t) => t.num)
-            .sort((a, b) => a.num - b.num)
-            .map((t) => ({ label: `Send to tray ${t.num}`, keys: String(t.num), run: () => engine.sendToTray(t.num) })),
+          ...(sendTo.length ? [{ label: 'Send to', sub: sendTo }] : []),
           { label: 'Select all', keys: 'Ctrl + A', run: () => engine.selectAll() },
         ]
       : at.kind === 'tray'
@@ -76,6 +89,22 @@ export default function ContextMenu({ engine, at, onClose }) {
     engine.setMenuFor(at.kind, at.id)
     return () => engine.setMenuFor(null)
   }, [engine, at.kind, at.id])
+
+  // The second menu opens to the right of its item, or to the left when there is no room, and is kept
+  // on screen.
+  useLayoutEffect(() => {
+    const m = ref.current
+    const sub = subRef.current
+    const item = open && m?.querySelector(`[data-sub="${open}"]`)
+    if (!sub || !item) return setSubPos(null)
+    const mr = m.getBoundingClientRect()
+    const ir = item.getBoundingClientRect()
+    const right = mr.right + sub.offsetWidth + 2 <= window.innerWidth - 4
+    setSubPos({
+      left: right ? mr.width - 3 : -sub.offsetWidth + 3,
+      top: Math.max(4 - mr.top, Math.min(ir.top - mr.top - 5, window.innerHeight - 4 - sub.offsetHeight - mr.top)),
+    })
+  }, [open, pos])
 
   useEffect(() => {
     const away = (e) => !ref.current?.contains(e.target) && onClose()
@@ -156,20 +185,66 @@ export default function ContextMenu({ engine, at, onClose }) {
           <span className="ref-pct">{Math.round(opacity * 100)}%</span>
         </label>
       )}
-      {items.map((it) => (
-        <button
-          key={it.label}
-          role="menuitem"
-          disabled={it.off}
-          onClick={() => {
-            onClose()
-            it.run()
-          }}
+      {items.map((it) =>
+        it.sub ? (
+          <button
+            key={it.label}
+            role="menuitem"
+            aria-haspopup="menu"
+            aria-expanded={open === it.label}
+            data-sub={it.label}
+            className={open === it.label ? 'open' : undefined}
+            onPointerEnter={() => setOpen(it.label)}
+            onClick={() => setOpen(it.label)}
+            onKeyDown={(e) => e.key === 'ArrowRight' && (setOpen(it.label), requestAnimationFrame(() => subRef.current?.querySelector('button')?.focus()))}
+          >
+            <span>{it.label}</span>
+            <span className="sub-arrow" aria-hidden="true">
+              ›
+            </span>
+          </button>
+        ) : (
+          <button
+            key={it.label}
+            role="menuitem"
+            disabled={it.off}
+            onPointerEnter={() => setOpen(null)}
+            onClick={() => {
+              onClose()
+              it.run()
+            }}
+          >
+            <span>{it.label}</span>
+            <kbd>{it.keys}</kbd>
+          </button>
+        ),
+      )}
+      {open && (
+        <div
+          ref={subRef}
+          className="context-menu sub-menu"
+          role="menu"
+          aria-label={open}
+          style={subPos ? { left: subPos.left, top: subPos.top } : { visibility: 'hidden' }}
+          onKeyDown={(e) => e.key === 'ArrowLeft' && (setOpen(null), ref.current?.querySelector(`[data-sub="${open}"]`)?.focus())}
         >
-          <span>{it.label}</span>
-          <kbd>{it.keys}</kbd>
-        </button>
-      ))}
+          {items
+            .find((it) => it.label === open)
+            ?.sub.map((it) => (
+              <button
+                key={it.label + it.keys}
+                role="menuitem"
+                onClick={() => {
+                  onClose()
+                  it.run()
+                }}
+              >
+                <span className="sub-label">{it.label}</span>
+                <kbd>{it.keys}</kbd>
+              </button>
+            ))}
+        </div>
+      )}
     </div>
   )
 }

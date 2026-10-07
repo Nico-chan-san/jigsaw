@@ -2907,10 +2907,10 @@ export class Engine {
     this.invalidate()
   }
 
-  // A number key with pieces selected: lays them out in a grid in the tray with that number, next to
-  // whatever is in it already, and takes them out of any other tray.
-  sendToTray(num) {
-    const t = this.trays.find((x) => x.num === num)
+  // A number key with pieces selected, or Send to in their menu: lays them out in a grid in the tray
+  // with that number (or id), next to whatever is in it already, and takes them out of any other tray.
+  sendToTray(which) {
+    const t = this.trays.find((x) => (typeof which === 'number' ? x.num === which : x.id === which))
     if (!t) return
     if (this.guard && !this.guard()) return
     const ids = this.freeSelection()
