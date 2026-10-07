@@ -537,7 +537,7 @@ export default function Room({ id }) {
       )}
       <div className="float tr">{account}</div>
       {engine && spectate && <Spectate engine={engine} />}
-      {menu && engine && !spectate && <ContextMenu engine={engine} at={menu} onClose={closeMenu} />}
+      {menu && engine && !spectate && <ContextMenu key={`${menu.kind}:${menu.id}:${menu.x}:${menu.y}`} engine={engine} at={menu} onClose={closeMenu} />}
       {helpShown && !spectate && <Help onClose={closeHelp} closing={helpClosing} />}
       {party && <Celebration key={partyKey} onDone={endParty} />}
       {import.meta.env.DEV && devMenu && engine && !spectate && (

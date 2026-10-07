@@ -1,5 +1,12 @@
 # Changelog
 
+## 7 October 2026
+
+- Trays have a new **⋯** button in their top right corner, next to the auto sort switch. It opens the tray's menu, the same one you get by right clicking the tray.
+- You can now name a tray and change its colour from its menu. The name shows quietly along the top of the tray, and hovering a name that is cut short shows it in full. Everyone in the room sees the change, and it can be undone.
+- When zoomed far out, a tray's number and buttons now hide once they no longer fit inside it.
+- Moving an empty tray, or images and notes as part of a selection, now saves where you put them. Before, they could jump back after reloading the page, and undo skipped the move.
+
 ## 6 October 2026
 
 - New spectator mode, in the settings menu: watch the jigsaw like a TV broadcast. Every player who is at the table gets their own screen, following their cursor and the area around it, with rounded corners and a shadow. Three players give two screens on top and one below in the middle, and the screens slide around when players join or leave. Only the all jigsaws and settings buttons are left on screen.

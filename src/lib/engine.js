@@ -55,6 +55,18 @@ const sameObj = (a, b) =>
 const snapSel = (e) => ({ p: new Set(e.sel), r: new Set(e.selRefs), n: new Set(e.selNotes) })
 const sameSet = (a, b) => a.size === b.size && [...a].every((v) => b.has(v))
 const sameSel = (a, b) => sameSet(a.p, b.p) && sameSet(a.r, b.r) && sameSet(a.n, b.n)
+// As much of text as fits in width pixels in ctx's font, ending in "…" when cut short; '' if none does.
+const fitText = (ctx, text, width) => {
+  if (ctx.measureText(text).width <= width) return text
+  let lo = 0
+  let hi = text.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (ctx.measureText(text.slice(0, mid).trimEnd() + '…').width <= width) lo = mid
+    else hi = mid - 1
+  }
+  return lo ? text.slice(0, lo).trimEnd() + '…' : ''
+}
 const sameLook = (a, b) => a.x === b.x && a.y === b.y && a.r === b.r && a.g === b.g && a.by === b.by && a.t === b.t
 const CURSOR_IDLE = 20000
 // Our selection and hover go out at most this often (ms); the most outlines drawn for other players.
@@ -763,8 +775,7 @@ export class Engine {
     this.invalidate()
   }
 
-  carryAt(wx, wy) {
-    const c = this.carry
+  carryAt(wx, wy, c = this.carry) {
     const dx = wx - c.wx
     const dy = wy - c.wy
     return {
@@ -824,7 +835,7 @@ export class Engine {
     // A click on a selected note without moving selects just that note.
     if (!c.moved && c.note) return this.notes?.click(c.note)
     if (!c.at) return
-    const { refs, notes, trays } = this.carryAt(...c.at)
+    const { refs, notes, trays } = this.carryAt(...c.at, c)
     for (const p of refs) {
       const ref = this.refs.find((r) => r.id === p.id)
       if (ref) this.onRef?.(ref, false)
@@ -953,10 +964,14 @@ export class Engine {
       this.invalidate()
       return
     }
-    // The auto sort switch on a tray.
+    // A tray's buttons: its auto sort switch, and its menu, opened below the button.
     if (e.button === 0 && !this.panMode) {
-      const t = this.badgeAt(sx, sy)
-      if (t) return this.setTrayAuto(t.id, !t.auto)
+      const b = this.trayButtonAt(sx, sy)
+      if (b?.kind === 'auto') return this.setTrayAuto(b.tray.id, !b.tray.auto)
+      if (b) {
+        const [x0, , , y1] = this.trayButtons(b.tray).menu
+        return this.openMenu({ kind: 'tray', id: b.tray.id, sx: x0, sy: y1 + 4 })
+      }
     }
     // Right (or middle) button drags the table, as does any press in view mode.
     if (e.button === 1 || e.button === 2 || (this.panMode && e.button === 0)) {
@@ -1283,13 +1298,26 @@ export class Engine {
       return this.showTip(null)
     }
     const [wx, wy] = this.toWorld(sx, sy)
-    const badge = this.badgeAt(sx, sy)
-    if (badge) {
+    const b = this.trayButtonAt(sx, sy)
+    if (b) {
       this.canvas.style.cursor = 'pointer'
       this.setHighlight(null)
-      return this.showTip({ text: badge.auto ? 'Auto sort is on: pieces put in this tray sort themselves' : 'Auto sort: sort the pieces put in this tray', sx, sy })
+      const text =
+        b.kind === 'menu'
+          ? 'Tray settings: name, colour and more'
+          : b.tray.auto
+            ? 'Auto sort is on: pieces put in this tray sort themselves'
+            : 'Auto sort: sort the pieces put in this tray'
+      return this.showTip({ text, sx, sy })
     }
     const { rh, th, i } = this.pick(sx, sy)
+    // A tray name that was cut short shows in full.
+    const nm = th && i < 0 && this.trayNames?.get(th.tray.id)
+    if (nm && sx >= nm.rect[0] && sx <= nm.rect[2] && sy >= nm.rect[1] && sy <= nm.rect[3]) {
+      this.canvas.style.cursor = this.cursorFor(-1, null, th)
+      this.setHighlight(null)
+      return this.showTip({ text: nm.text, sx, sy })
+    }
     this.canvas.style.cursor = this.cursorFor(this.done ? -1 : i, rh, th)
     let hl = null
     if (i >= 0 && this.by[i] && this.connected(i)) {
@@ -2523,6 +2551,7 @@ export class Engine {
       y: y - h / 2,
       w,
       h,
+      name: '',
       color,
       num,
       auto: false,
@@ -2698,25 +2727,49 @@ export class Engine {
     this.autoSort({ into: t })
   }
 
-  // The screen rectangle of a tray's auto sort switch, at its top right corner: [x0, y0, x1, y1].
-  trayBadge(t) {
+  // The screen rectangles, [x0, y0, x1, y1], of a tray's buttons at its top right corner: its menu
+  // in the corner and its auto sort switch beside it.
+  trayButtons(t) {
     const { cam, vw, vh } = this
     const tag = Math.max(14, this.geo.S * 0.4 * cam.z)
     const gap = tag * 0.3
-    const w = tag
     const x1 = (t.x + t.w - cam.x) * cam.z + vw / 2 - gap
     const y0 = (t.y - cam.y) * cam.z + vh / 2 + gap
-    return { rect: [x1 - w, y0, x1, y0 + tag], tag }
+    const x0 = x1 - tag - gap * 0.6
+    return { menu: [x1 - tag, y0, x1, y0 + tag], auto: [x0 - tag, y0, x0, y0 + tag], tag }
   }
 
-  // The tray whose auto sort switch is at a screen point, if any.
-  badgeAt(sx, sy) {
+  // Whether a tray is big enough on the screen to hold its number and buttons along its top edge.
+  // Zoomed far out it isn't, and they are left out.
+  trayTagsFit(t) {
+    const tag = Math.max(14, this.geo.S * 0.4 * this.cam.z)
+    const gap = tag * 0.3
+    const w = gap + (t.num ? tag + gap : 0) + tag * 2 + gap * 1.6
+    return t.w * this.cam.z >= w && t.h * this.cam.z >= tag + gap * 2
+  }
+
+  // The tray button at a screen point, if any: { tray, kind }, kind being 'menu' or 'auto'.
+  trayButtonAt(sx, sy) {
     for (let k = this.trays.length - 1; k >= 0; k--) {
       const t = this.trays[k]
-      const [x0, y0, x1, y1] = this.trayBadge(t).rect
-      if (sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1) return t
+      if (!this.trayTagsFit(t)) continue
+      const b = this.trayButtons(t)
+      for (const kind of ['menu', 'auto']) {
+        const [x0, y0, x1, y1] = b[kind]
+        if (sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1) return { tray: t, kind }
+      }
     }
     return null
+  }
+
+  // Renames or recolours a tray (look: { name } or { color }), for everyone.
+  setTrayLook(id, look) {
+    const t = this.trays.find((x) => x.id === id)
+    if (!t || Object.keys(look).every((k) => t[k] === look[k])) return
+    if (this.guard && !this.guard()) return
+    Object.assign(t, look)
+    this.onTray?.(t, false)
+    this.invalidate()
   }
 
   // A number key with pieces selected: lays them out in a grid in the tray with that number, next to
@@ -3359,38 +3412,79 @@ export class Engine {
     ctx.shadowColor = 'transparent'
   }
 
-  // Tray numbers, in a tag in the tray's colour at its top left corner, above the notes and trays.
-  // It scales with the zoom like everything on the table, but never gets too small to read.
+  // A tray's number, name and buttons along its top edge, above the notes and trays. They scale with
+  // the zoom like everything on the table, but never get too small to read.
   drawTrayTags() {
     const octx = this.octx
-    // Tray numbers, in a tag in the tray's colour at its top left corner. It scales with the zoom
-    // like everything on the table, but never gets too small to read.
     const { dpr, cam, vw, vh } = this
     const tag = Math.max(14, this.geo.S * 0.4 * cam.z)
     const gap = tag * 0.3
-    for (const t of this.trays) {
-      if (!t.num) continue
+    // Names cut short to fit, by tray id: { rect, text }, so hovering one shows it in full.
+    this.trayNames = new Map()
+    // On a light table, names are a darker shade of their tray's colour, to stay readable.
+    const [br, bg, bb] = rgba(this.colors.bg)
+    const light = 0.2126 * br + 0.7152 * bg + 0.0722 * bb > 0.5
+    const shade = (css) => {
+      const [r, g, b] = rgba(css)
+      return `rgb(${[r, g, b].map((v) => Math.round(v * 255 * 0.6)).join(', ')})`
+    }
+    const shown = this.trays.filter((t) => this.trayTagsFit(t))
+    for (const t of shown) {
       const x = (t.x - cam.x) * cam.z + vw / 2
       const y = (t.y - cam.y) * cam.z + vh / 2
       if (x > vw || y > vh || x + t.w * cam.z < 0 || y + t.h * cam.z < 0) continue
-      octx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      octx.beginPath()
-      octx.roundRect(x + gap, y + gap, tag, tag, tag * 0.3)
-      octx.fillStyle = TRAY_COLORS[t.color] || TRAY_COLORS.gray
-      octx.fill()
-      octx.fillStyle = '#fff'
-      octx.font = `700 ${Math.round(tag * 0.6)}px system-ui, -apple-system, sans-serif`
-      octx.textAlign = 'center'
-      octx.textBaseline = 'middle'
-      octx.fillText(String(t.num), x + gap + tag / 2, y + gap + tag / 2 + tag * 0.03)
-      octx.textAlign = 'start'
-    }
-    // The auto sort switch at the top right: filled when on, an outline when off.
-    for (const t of this.trays) {
-      const [x0, y0, x1, y1] = this.trayBadge(t).rect
-      if (x0 > vw || y0 > vh || x1 < 0 || y1 < 0) continue
       const color = TRAY_COLORS[t.color] || TRAY_COLORS.gray
       octx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      octx.textBaseline = 'middle'
+      // The number, in a tag in the tray's colour at its top left corner.
+      if (t.num) {
+        octx.beginPath()
+        octx.roundRect(x + gap, y + gap, tag, tag, tag * 0.3)
+        octx.fillStyle = color
+        octx.fill()
+        octx.fillStyle = '#fff'
+        octx.font = `700 ${Math.round(tag * 0.6)}px system-ui, -apple-system, sans-serif`
+        octx.textAlign = 'center'
+        octx.fillText(String(t.num), x + gap + tag / 2, y + gap + tag / 2 + tag * 0.03)
+        octx.textAlign = 'start'
+      }
+      // The name, quietly, between the number and the buttons.
+      const name = t.name?.trim()
+      if (!name) continue
+      const x0 = x + gap + (t.num ? tag + gap : 0)
+      const x1 = this.trayButtons(t).auto[0] - gap
+      octx.font = `500 ${Math.round(tag * 0.55)}px system-ui, -apple-system, sans-serif`
+      const text = fitText(octx, name, x1 - x0)
+      if (!text) continue
+      octx.globalAlpha = light ? 1 : 0.8
+      octx.fillStyle = light ? shade(color) : color
+      octx.fillText(text, x0, y + gap + tag / 2 + tag * 0.03)
+      octx.globalAlpha = 1
+      if (text !== name) this.trayNames.set(t.id, { rect: [x0, y + gap, x0 + octx.measureText(text).width, y + gap + tag], text: name })
+    }
+    for (const t of shown) {
+      const b = this.trayButtons(t)
+      const [x0, y0, x1, y1] = b.auto
+      const right = b.menu[2]
+      if (x0 > vw || y0 > vh || right < 0 || y1 < 0) continue
+      const color = TRAY_COLORS[t.color] || TRAY_COLORS.gray
+      octx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      // The menu button in the corner: three dots in an outline.
+      const [m0, n0, m1, n1] = b.menu
+      octx.beginPath()
+      octx.roundRect(m0, n0, m1 - m0, n1 - n0, tag * 0.3)
+      octx.globalAlpha = 0.7
+      octx.lineWidth = 1.25
+      octx.strokeStyle = color
+      octx.stroke()
+      octx.globalAlpha = 1
+      octx.fillStyle = color
+      for (const k of [-1, 0, 1]) {
+        octx.beginPath()
+        octx.arc((m0 + m1) / 2 + k * tag * 0.22, (n0 + n1) / 2, tag * 0.07, 0, Math.PI * 2)
+        octx.fill()
+      }
+      // The auto sort switch beside it: filled when on, an outline when off.
       octx.beginPath()
       octx.roundRect(x0, y0, x1 - x0, y1 - y0, tag * 0.3)
       if (t.auto) {

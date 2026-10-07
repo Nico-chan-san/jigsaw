@@ -2162,6 +2162,34 @@ button.link:hover {
   color: var(--muted);
   font: 600 11px/1 ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
+/* A tray's name and colour, at the top of its menu. */
+.context-menu .tray-look {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 4px;
+  padding: 6px 6px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.context-menu .tray-colors {
+  display: flex;
+  justify-content: space-between;
+}
+.context-menu .tray-colors button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--c);
+}
+.context-menu .tray-colors button:not(:disabled):hover {
+  background: var(--c);
+  transform: scale(1.12);
+}
+.context-menu .tray-colors button[aria-checked='true'] {
+  box-shadow:
+    0 0 0 2px var(--panel),
+    0 0 0 4px var(--c);
+}
 
 /* Total time, under the players list heading. */
 .players .ptotal {
