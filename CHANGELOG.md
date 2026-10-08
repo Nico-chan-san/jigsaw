@@ -1,9 +1,5 @@
 # Changelog
 
-## 8 October 2026
-
-- When you share a jigsaw's link in a chat app such as Slack, the preview now shows the jigsaw's name and picture, how many pieces it has, how far along it is and the total time played.
-
 ## 7 October 2026
 
 - The outline around selected pieces is smoother: it's the same thickness all the way round and follows the piece's shape closely, without a gap. It's blue for your own selection and in the other player's colour for theirs, and pieces being carried keep their outline too, on your screen and everyone else's.
