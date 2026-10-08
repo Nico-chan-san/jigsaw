@@ -142,7 +142,19 @@ function lanAddress() {
 // Where links in emails point: APP_URL when set, otherwise the address the browser used.
 function siteOrigin(req) {
   if (process.env.APP_URL) return process.env.APP_URL.replace(/\/+$/, '')
-  return req.headers.origin || `http://${req.headers.host}`
+  return req.headers.origin || `${req.headers['x-forwarded-proto'] || 'http'}://${req.headers.host}`
+}
+
+const escapeHtml = (s) =>
+  String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+
+// Seconds as the game shows them: 4:05, or 1:04:05 from an hour.
+function formatTime(total) {
+  const s = Math.floor(total)
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const ss = String(s % 60).padStart(2, '0')
+  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`
 }
 
 function send(res, status, body) {
@@ -168,6 +180,10 @@ function createApi(dbFile) {
       'SELECT id, name, created, cols, rows, shape, seed, width, height, annoying, long_pieces AS longPieces, owner, private FROM rooms WHERE id = ?',
     ),
     image: db.prepare('SELECT image, image_type FROM rooms WHERE id = ?'),
+    progress: db.prepare(`
+      SELECT CASE WHEN r.units > 0 THEN r.units ELSE COUNT(p.idx) END AS n, COUNT(DISTINCT p.g) AS groups,
+             (SELECT COALESCE(SUM(t.seconds), 0) FROM times t WHERE t.room_id = r.id) AS seconds
+      FROM rooms r LEFT JOIN pieces p ON p.room_id = r.id WHERE r.id = ?`),
     pieces: db.prepare('SELECT idx AS i, x, y, r, g, by, f FROM pieces WHERE room_id = ? ORDER BY idx'),
     insertRoom: db.prepare(`
       INSERT INTO rooms (id, name, created, cols, rows, shape, seed, width, height, image, image_type, thumb, annoying, owner, private, long_pieces, units)
@@ -712,7 +728,28 @@ function createApi(dbFile) {
     }
   }
 
-  return { middleware, connect }
+  // The app's page for a room link, with the jigsaw's name, picture and progress in the tags that
+  // chat apps such as Slack read for link previews.
+  function roomPage(html, id, req) {
+    const room = q.room.get(id)
+    if (!room) return html
+    const { n, groups, seconds } = q.progress.get(id)
+    const progress = n > 0 && groups === 1 ? 'finished' : `${n > 1 ? Math.floor((100 * (n - groups)) / (n - 1)) : 0}% done`
+    const origin = siteOrigin(req)
+    const tags = {
+      'og:type': 'website',
+      'og:site_name': 'Jigsaw',
+      'og:title': room.name,
+      'og:description': `${n} pieces · ${progress} · total time ${formatTime(seconds)}`,
+      'og:url': `${origin}/r/${id}`,
+      'og:image': `${origin}/api/rooms/${id}/image`,
+    }
+    const meta = Object.entries(tags).map(([k, v]) => `<meta property="${k}" content="${escapeHtml(v)}" />`)
+    meta.push('<meta name="twitter:card" content="summary_large_image" />')
+    return html.replace('</head>', `${meta.join('\n    ')}\n  </head>`)
+  }
+
+  return { middleware, connect, roomPage }
 }
 
 export default function sqliteApi(options = {}) {
@@ -721,6 +758,23 @@ export default function sqliteApi(options = {}) {
   const mount = (server) => {
     api ??= createApi(file)
     server.middlewares.use(api.middleware)
+    // Room links (/r/<id>) get the app's page with link preview tags. The dev server makes the page
+    // from index.html, preview serves the built one.
+    server.middlewares.use(async (req, res, next) => {
+      const m = req.method === 'GET' && /^\/r\/([\w-]+)\/?$/.exec(new URL(req.url, 'http://x').pathname)
+      if (!m) return next()
+      try {
+        const { root, build } = server.config
+        const html = server.transformIndexHtml
+          ? await server.transformIndexHtml(req.url, readFileSync(join(root, 'index.html'), 'utf8'), req.originalUrl)
+          : readFileSync(resolve(root, build.outDir, 'index.html'), 'utf8')
+        res.setHeader('Content-Type', 'text/html')
+        res.setHeader('Cache-Control', 'no-cache')
+        res.end(api.roomPage(html, m[1], req))
+      } catch {
+        next()
+      }
+    })
     if (server.httpServer) attachWebSocket(server.httpServer, '/api/ws', api.connect)
   }
   return {
