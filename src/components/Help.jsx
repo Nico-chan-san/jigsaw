@@ -75,6 +75,7 @@ const SECTIONS = [
       [<Key key="g">G</Key>, 'Sort into a grid'],
       [<Combo key="sg" keys={['Shift', 'G']} />, 'Shuffle into a grid'],
       [<Range key="tn" from="1" to="9" />, 'Send to tray'],
+      [<Key key="rn">R</Key>, 'Rename the selected tray'],
       [<Combo key="sa" keys={[MOD, 'A']} />, 'Select all'],
       [<Key key="e">Esc</Key>, 'Deselect'],
       [<Either key="del" keys={['Delete', 'Backspace']} />, 'Remove'],

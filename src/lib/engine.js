@@ -164,7 +164,8 @@ export class Engine {
     this.onStats = onStats
     // Pieces just connected, by this player (local) or another: onSnap({ seams, local }). The sound ignores seams.
     this.onSnap = onSnap
-    // A right click on a piece, image, tray or note, without dragging: onMenu(sx, sy, kind, id). It is selected.
+    // A right click on a piece, image, tray or note, without dragging: onMenu(sx, sy, kind, id, { rename }).
+    // It is selected. rename: R on a tray, to start in its name field.
     this.onMenu = onMenu
     // Undo and redo, for this player's own moves: onHistory({ undo, redo }) says what is available.
     this.onHistory = onHistory
@@ -1127,7 +1128,16 @@ export class Engine {
     this.setHighlight(null)
   }
 
-  // A right click on a piece, image or tray (m.kind): selects it, as a click would, and asks for the menu.
+  // Opens a tray's menu below its menu button, with its name field ready to type in.
+  renameTray(id) {
+    const t = this.trays.find((x) => x.id === id)
+    if (!t) return
+    const [x0, , , y1] = this.trayButtons(t).menu
+    this.openMenu({ kind: 'tray', id, sx: x0, sy: y1 + 4, rename: true })
+  }
+
+  // A right click on a piece, image or tray (m.kind): selects it, as a click would, and asks for the
+  // menu. m.rename asks a tray's menu to start in its name field.
   openMenu(m) {
     if (!this.onMenu) return
     this.selectRef(null)
@@ -1139,7 +1149,7 @@ export class Engine {
       if (m.kind === 'ref') this.selectRef(m.id)
       if (m.kind === 'tray') this.selectTray(m.id)
     }
-    this.onMenu(m.sx, m.sy, m.kind, m.id)
+    this.onMenu(m.sx, m.sy, m.kind, m.id, { rename: !!m.rename })
   }
 
   // The same for a note, which is not part of the canvas: at a window position.
@@ -1396,6 +1406,12 @@ export class Engine {
     if (/^[1-9]$/.test(key) && this.sel.size) {
       e.preventDefault()
       if (!e.repeat) this.sendToTray(+key)
+      return
+    }
+    // R with a tray selected opens its menu with the name ready to type over.
+    if (key === 'r' && this.traySel && !this.sel.size) {
+      e.preventDefault()
+      if (!e.repeat) this.renameTray(this.traySel)
       return
     }
     // With a selection on the table (or a tray selected), space turns the pieces where they lie
@@ -2218,6 +2234,10 @@ export class Engine {
     if (loose.length) changes.push(this.placeInTrays(loose, d.px, d.py))
     this.commit(changed)
     for (const c of changes) this.autoSort(c)
+    // A tray whose last pieces were dragged out goes. It's the same step to undo, so undo brings it
+    // back with them.
+    const emptied = new Set(changes.flatMap((c) => c?.left || []).filter((t) => !t.pieces.length))
+    for (const t of emptied) this.removeTray(t.id)
   }
 
   // With out given, out.onto is set to the piece the group snapped onto, if any.

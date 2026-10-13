@@ -44,6 +44,12 @@ export default function ContextMenu({ engine, at, onClose }) {
     },
     [],
   )
+  // Opened with R on a tray: straight into its name, selected to type over.
+  useEffect(() => {
+    if (!at.rename) return
+    nameRef.current?.focus()
+    nameRef.current?.select()
+  }, [])
   const turn = [
     { label: 'Turn', keys: 'Space', run: () => engine.rotateSelection(1), off: empty },
     { label: 'Turn as one', keys: 'Shift + Space', run: () => engine.rotateSelection(1, true), off: empty },

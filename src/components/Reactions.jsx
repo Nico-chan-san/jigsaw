@@ -58,18 +58,19 @@ export default function Reactions({ engine, busRef, hint }) {
     return () => (busRef.current = null)
   }, [engine, busRef])
 
-  // R turns reactions on or off.
+  // R turns reactions on or off, unless a tray is selected: then it renames the tray (see the engine).
   useEffect(() => {
     const key = (e) => {
       if (e.key !== 'r' && e.key !== 'R') return
       if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
       if (e.target?.closest?.('input, textarea, [contenteditable]')) return
       if (document.querySelector('.modal-bg')) return
+      if (engine?.traySel && !engine.sel.size) return
       setOn((v) => !v)
     }
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
-  }, [])
+  }, [engine])
 
   // While on, a left press on the board pours it instead of reaching the engine.
   useEffect(() => {

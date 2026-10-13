@@ -2,6 +2,8 @@
 
 ## 13 October 2026
 
+- A tray goes away once you drag the last pieces out of it. Undo brings it back with them.
+- Press **R** with a tray selected to rename it. Without a tray selected, **R** still celebrates.
 - Spectator mode is gone, along with its switch in the settings menu.
 - The shadow under a jigsaw in the all jigsaws window is no longer cut off at the edges of the list.
 - The players panel is replaced by circles at the top right for the players who are here now, with the first two letters of their name in their colour. Yours comes first, tagged **You**. Rest the pointer on a circle to see their name, pieces connected, time spent and whether they made the jigsaw. The **⋯** button next to them lists everyone, here now and away.

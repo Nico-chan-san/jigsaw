@@ -193,7 +193,7 @@ export default function Room({ id }) {
           onTrayDelete: (trayId) => api.deleteTray(id, trayId),
           onStats: () => setStats(eng.contributors()),
           onSnap: playSnap,
-          onMenu: (x, y, kind, id) => setMenu({ x, y, kind, id }),
+          onMenu: (x, y, kind, id, opts) => setMenu({ x, y, kind, id, rename: !!opts?.rename }),
           onHistory: setHist,
           onComplete: () => {
             setDone(true)
