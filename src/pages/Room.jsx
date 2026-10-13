@@ -122,8 +122,9 @@ export default function Room({ id }) {
   const createNote = useRef(null)
   const [stats, setStats] = useState(() => new Map())
   const [times, setTimes] = useState({})
-  // Player ids in the room right now.
+  // Player ids in the room right now, and when the others were last here (ms by id).
   const [online, setOnline] = useState(() => new Set())
+  const [seen, setSeen] = useState({})
   // Shown automatically the first time this player opens each jigsaw.
   const [help, setHelp] = useState(() => !store.get(`help:${id}`))
   const [helpShown, helpClosing] = useLinger(help)
@@ -212,6 +213,7 @@ export default function Room({ id }) {
         if (dead) return
         learn(room.players)
         setOnline(new Set(room.online || []))
+        setSeen(room.seen || {})
         eng.setColors(readColors())
         setStats(eng.contributors())
         setDone(eng.isComplete())
@@ -231,6 +233,7 @@ export default function Room({ id }) {
               eng.invalidate()
             } else if (msg.type === 'presence') {
               setOnline(new Set(msg.online || []))
+              setSeen((s) => ({ ...s, ...msg.seen }))
             } else if (msg.type === 'time') timeBus.current?.(msg)
             else if (msg.type === 'note' || msg.type === 'note-delete') noteBus.current?.(msg)
             else if (msg.type === 'react') reactBus.current?.(msg)
@@ -249,6 +252,7 @@ export default function Room({ id }) {
             eng.setTrays(fresh.trays || [])
             learn(fresh.players)
             setOnline(new Set(fresh.online || []))
+            setSeen(fresh.seen || {})
             noteBus.current?.({ type: 'notes-reset', notes: fresh.notes || [] })
           },
         })
@@ -447,7 +451,7 @@ export default function Room({ id }) {
       {play && <div className="play-tools tc">{play}</div>}
       {engine && (
         <div className="tr">
-          <Players stats={stats} times={times} me={playerId} owner={data?.owner} nameOf={nameOf} online={online} />
+          <Players stats={stats} times={times} me={playerId} owner={data?.owner} nameOf={nameOf} online={online} seen={seen} />
         </div>
       )}
       {menu && engine && <ContextMenu key={`${menu.kind}:${menu.id}:${menu.x}:${menu.y}`} engine={engine} at={menu} onClose={closeMenu} />}

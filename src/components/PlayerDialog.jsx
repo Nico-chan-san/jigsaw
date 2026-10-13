@@ -4,7 +4,7 @@ import { useApp } from '../App.jsx'
 import { formatTime } from '../lib/time.js'
 import { Card, CardGhosts } from '../pages/Rooms.jsx'
 import Dialog from './Dialog.jsx'
-import { Dot } from './Players.jsx'
+import { Dot, presence } from './Players.jsx'
 import { Clock, Crown, Piece, User } from './icons.jsx'
 
 const plural = (n, one) => `${n} ${n === 1 ? one : `${one}s`}`
@@ -12,8 +12,8 @@ const plural = (n, one) => `${n} ${n === 1 ? one : `${one}s`}`
 // A player's window, from their circle in the header: who they are, what they did in this jigsaw,
 // and the other jigsaws they've played. Private jigsaws only show if this player has them too (the
 // server checks). p is the player as the header knows them: { id, name, pieces, seconds }. Your own
-// window has a button to your account (onAccount).
-export default function PlayerDialog({ p, here, owner, me, onAccount, onClose, closing }) {
+// window has a button to your account (onAccount). seen is when they were last in this jigsaw.
+export default function PlayerDialog({ p, here, owner, me, seen, onAccount, onClose, closing }) {
   const { player, roomId, openRoom } = useApp()
   const [info, setInfo] = useState(null)
   const [failed, setFailed] = useState(false)
@@ -32,6 +32,8 @@ export default function PlayerDialog({ p, here, owner, me, onAccount, onClose, c
   }, [p.id, player?.passphrase])
 
   const others = info?.rooms.filter((r) => r.id !== roomId) || []
+  // Last online: the latest of here and the jigsaws of theirs you can see.
+  const last = Math.max(seen || 0, ...(info?.rooms.map((r) => r.seen || 0) || []))
   const since = info?.created ? new Date(info.created).toLocaleDateString(undefined, { dateStyle: 'medium' }) : ''
   const open = (id) => {
     onClose()
@@ -45,7 +47,7 @@ export default function PlayerDialog({ p, here, owner, me, onAccount, onClose, c
         <div className="profile-who">
           <span className="profile-status">
             <span className={`presence${here ? ' here' : ''}`} />
-            {here ? 'Here now' : 'Away'}
+            {presence(here, last)}
             {p.id === me && ' · you'}
           </span>
           {since && <span className="profile-since">Playing since {since}</span>}

@@ -1490,7 +1490,7 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 /* ---- players (see Players.jsx and PlayerDialog.jsx) ---- */
 
 /* The first few players as circles in the header, on their own without a panel behind them, then
-   ... for everyone. */
+   the players button for everyone. */
 .players {
   position: relative;
   display: flex;
@@ -1610,6 +1610,11 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   filter: brightness(0.96);
 }
 
+/* Beside a row of the players list, placed in the window (see Players.jsx). */
+.player-card.side {
+  position: fixed;
+  right: auto;
+}
 /* The card that shows while the pointer rests on a circle. */
 .player-card {
   position: absolute;
@@ -1689,7 +1694,7 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   background: #30a46c;
 }
 
-/* Everyone, under the ... button. */
+/* Everyone, under the players button. */
 .players-menu {
   position: absolute;
   top: calc(100% + 8px);

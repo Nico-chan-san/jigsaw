@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { cursorColor } from '../lib/engine.js'
-import { formatTime } from '../lib/time.js'
+import { formatTime, timeAgo } from '../lib/time.js'
 import { useLinger } from '../lib/linger.js'
-import { Clock, Crown, More, Piece } from './icons.jsx'
+import { Clock, Crown, Piece, Users } from './icons.jsx'
 import PlayerDialog from './PlayerDialog.jsx'
 import AccountDialog from './AccountDialog.jsx'
 
-// At most this many circles in the header; everyone is in the menu behind the ... button.
+// At most this many circles in the header; everyone is in the menu behind the players button.
 const SHOWN = 5
 // How long the pointer rests on a circle before its card shows (ms).
 const HOVER_MS = 250
@@ -46,10 +46,20 @@ export function Dot({ p, here, big = false, you = false }) {
   )
 }
 
-// What shows while the pointer rests on a circle: who they are and what they've done here.
-function HoverCard({ p, here, owner, me }) {
+// Where someone is: here now, or when they were last online (seen, ms), if known, as "20 minutes ago".
+export function presence(here, seen) {
+  if (here) return 'Here now'
+  if (!seen) return 'Away'
+  const t = timeAgo(seen)
+  return t[0].toUpperCase() + t.slice(1)
+}
+
+// What shows while the pointer rests on a player: who they are and what they've done here. seen is
+// when they were last here. With at ({ top, left }), it's placed there in the window, beside a row
+// of the players list.
+function HoverCard({ p, here, seen, owner, me, at }) {
   return (
-    <div className="player-card" role="tooltip">
+    <div className={`player-card${at ? ' side' : ''}`} role="tooltip" style={at}>
       <div className="player-card-head">
         <Dot p={p} here={here} />
         <div>
@@ -59,7 +69,7 @@ function HoverCard({ p, here, owner, me }) {
           </div>
           <div className="player-card-sub">
             <span className={`presence${here ? ' here' : ''}`} />
-            {here ? 'Here now' : 'Away'}
+            {presence(here, seen)}
           </div>
         </div>
       </div>
@@ -81,10 +91,11 @@ function HoverCard({ p, here, owner, me }) {
   )
 }
 
-// The players in the header: those here now as circles, by rank. The ... button opens a list of
+// The players in the header: those here now as circles, by rank. The players button opens a list of
 // everyone, here now and away, and a circle or a name opens that player's window.
 // owner is the id of the player who made the jigsaw, online a Set of the player ids here now.
-export default function Players({ stats, times, me, owner, nameOf, online }) {
+// seen is when each player was last here (ms by id).
+export default function Players({ stats, times, me, owner, nameOf, online, seen = {} }) {
   const [open, setOpen] = useState(false)
   const [hover, setHover] = useState(null)
   const [profile, setProfile] = useState(null)
@@ -133,8 +144,27 @@ export default function Players({ stats, times, me, owner, nameOf, online }) {
     clearTimeout(timer.current)
     setHover(null)
   }
+  // The card beside a row of the players list, which scrolls, so it's placed in the window: to the
+  // left of the list, level with the row.
+  const [rowHover, setRowHover] = useState(null)
+  const showRow = (p, row) => {
+    clearTimeout(timer.current)
+    const r = row.getBoundingClientRect()
+    const menu = row.closest('.players-menu').getBoundingClientRect()
+    const at = { top: Math.max(8, r.top - 6), left: menu.left - 12 - 220 }
+    if (rowHover) setRowHover({ p, at })
+    else timer.current = setTimeout(() => setRowHover({ p, at }), HOVER_MS)
+  }
+  const hideRow = () => {
+    clearTimeout(timer.current)
+    setRowHover(null)
+  }
+  useEffect(() => {
+    if (!open) setRowHover(null)
+  }, [open])
   const openProfile = (p) => {
     hide()
+    hideRow()
     setOpen(false)
     setProfile(p)
   }
@@ -158,7 +188,7 @@ export default function Players({ stats, times, me, owner, nameOf, online }) {
             >
               <Dot p={p} here={online.has(p.id)} you={p.id === me} />
             </button>
-            {hover === p.id && !open && <HoverCard p={p} here={online.has(p.id)} owner={owner} me={me} />}
+            {hover === p.id && !open && <HoverCard p={p} here={online.has(p.id)} seen={seen[p.id]} owner={owner} me={me} />}
           </li>
         ))}
       </ul>
@@ -170,7 +200,7 @@ export default function Players({ stats, times, me, owner, nameOf, online }) {
           aria-expanded={open}
           data-tip={`All players (${list.length})`}
         >
-          <More />
+          <Users />
         </button>
       )}
       {open && (
@@ -191,22 +221,30 @@ export default function Players({ stats, times, me, owner, nameOf, online }) {
                     <span className="n">{group.length}</span>
                   </h2>
                   {group.map((p) => (
-                    <button key={p.id} className={`players-row${p.id === me ? ' me' : ''}`} onClick={() => openProfile(p)}>
+                    <button
+                      key={p.id}
+                      className={`players-row${p.id === me ? ' me' : ''}`}
+                      onClick={() => openProfile(p)}
+                      onPointerEnter={(e) => e.pointerType === 'mouse' && showRow(p, e.currentTarget)}
+                      onPointerLeave={hideRow}
+                      onFocus={(e) => e.target.matches(':focus-visible') && showRow(p, e.currentTarget)}
+                      onBlur={hideRow}
+                    >
                       <Dot p={p} here={online.has(p.id)} />
                       <span className="pname">
                         {p.name}
                         {p.id === me && <span className="you-label"> you</span>}
                         {p.id === owner && (
-                          <span className="powner" title="Made this jigsaw">
+                          <span className="powner">
                             <Crown />
                           </span>
                         )}
                       </span>
-                      <span className="pstat" title="Pieces connected">
+                      <span className="pstat">
                         <Piece />
                         {p.pieces}
                       </span>
-                      <span className="pstat ptime" title="Time spent">
+                      <span className="pstat ptime">
                         <Clock />
                         {formatTime(p.seconds)}
                       </span>
@@ -217,12 +255,23 @@ export default function Players({ stats, times, me, owner, nameOf, online }) {
           )}
         </div>
       )}
+      {open && rowHover && (
+        <HoverCard
+          p={rowHover.p}
+          here={online.has(rowHover.p.id)}
+          seen={seen[rowHover.p.id]}
+          owner={owner}
+          me={me}
+          at={rowHover.at}
+        />
+      )}
       {current && (
         <PlayerDialog
           p={current}
           here={online.has(current.id)}
           owner={owner}
           me={me}
+          seen={seen[current.id]}
           onAccount={openAccount}
           onClose={closeProfile}
           closing={profileClosing}

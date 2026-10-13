@@ -9,9 +9,9 @@
 - Press **R** with a tray selected to rename it. Without a tray selected, **R** still celebrates.
 - Spectator mode is gone, along with its switch in the settings menu.
 - The shadow under a jigsaw in the all jigsaws window is no longer cut off at the edges of the list.
-- The players panel is replaced by circles at the top right for the players who are here now, with the first two letters of their name in their colour. Yours comes first, tagged **You**. Rest the pointer on a circle to see their name, pieces connected, time spent and whether they made the jigsaw. The **⋯** button next to them lists everyone, here now and away.
-- The **⋯** players list starts with the total time spent by everyone.
-- Click a player to open their window: what they did in this jigsaw, and the other jigsaws they have played, in a row you can scroll through. Private jigsaws only show there if you have them too.
+- The players panel is replaced by circles at the top right for the players who are here now, with the first two letters of their name in their colour. Yours comes first, tagged **You**. Rest the pointer on a circle to see their name, pieces connected, time spent and whether they made the jigsaw. The players button next to them lists everyone, here now and away, with the same card when you point at a name, saying how long ago each player was last here.
+- The players list starts with the total time spent by everyone.
+- Click a player to open their window: how long ago they were last online, what they did in this jigsaw, and the other jigsaws they have played, in a row you can scroll through. Private jigsaws only show there if you have them too.
 - **How to play** has moved to the settings menu, and the fullscreen button is gone. **H** and **F** still work.
 - The zoom and fit to screen buttons are gone. Use **+**, **-** and **C**, or scroll and pinch.
 - Pointing at a toolbar button now shows a small card with what it does and its shortcut key, in place of the browser's plain tooltip.

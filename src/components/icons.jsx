@@ -81,11 +81,11 @@ export const Trash = (p) => (
   </Svg>
 )
 
-export const More = (p) => (
+export const Users = (p) => (
   <Svg {...p}>
-    <circle cx="6" cy="12" r="1.4" fill="currentColor" stroke="none" />
-    <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
-    <circle cx="18" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="9" cy="8.5" r="3" />
+    <path d="M3.5 19a5.5 5.5 0 0 1 11 0" />
+    <path d="M15.5 5.8a3 3 0 0 1 0 5.4M17.5 14.2A5.5 5.5 0 0 1 20.5 19" />
   </Svg>
 )
 
