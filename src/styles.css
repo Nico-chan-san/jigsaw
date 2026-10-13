@@ -1898,6 +1898,9 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   .profile-rooms > * {
     width: 170px;
   }
+  .profile-empty {
+    height: calc(170px * 3 / 4 + 24px);
+  }
 }
 /* What they did in a jigsaw, under its card. */
 .profile-share {
@@ -1921,8 +1924,14 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   height: 13px;
 }
 .profile-empty {
+  /* As tall as the row of cards it stands in for (a card and its line under it), so the window keeps
+     its height when the cards turn out to be none. */
+  display: grid;
+  place-items: center;
+  height: calc(220px * 3 / 4 + 24px);
   margin: 0;
   color: var(--muted);
+  text-align: center;
 }
 
 /* ---- help dialog ---- */
