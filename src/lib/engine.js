@@ -125,7 +125,7 @@ const PAN_KEYS = {
   s: [0, 1],
 }
 const CURSOR_COLORS = ['#e5484d', '#0090ff', '#30a46c', '#f76b15', '#8e4ec6', '#d6409f', '#12a594', '#ca8a04']
-const cursorColor = (id) => {
+export const cursorColor = (id) => {
   let h = 0
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0
   return CURSOR_COLORS[Math.abs(h) % CURSOR_COLORS.length]

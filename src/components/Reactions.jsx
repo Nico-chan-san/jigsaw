@@ -121,7 +121,8 @@ export default function Reactions({ engine, busRef, hint }) {
         aria-label="Celebrate"
         aria-pressed={on}
         aria-keyshortcuts="R"
-        title={on ? 'Celebrate: press on the board to throw confetti. Click to stop (R)' : 'Celebrate (R)'}
+        data-tip={on ? 'Celebrate: press on the board to throw confetti. Click to stop' : 'Celebrate'}
+        data-key="R"
       >
         <span className="react-emoji">{EMOJI}</span>
         {hint}

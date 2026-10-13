@@ -43,35 +43,15 @@ export const Sound = (p) => (
   </Svg>
 )
 
-export const Fit = (p) => (
-  <Svg {...p}>
-    <circle cx="12" cy="12" r="7" />
-    <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
-    <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" />
-  </Svg>
-)
-
 export const Fullscreen = (p) => (
   <Svg {...p}>
     <path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4" />
   </Svg>
 )
 
-export const ExitFullscreen = (p) => (
-  <Svg {...p}>
-    <path d="M9 4v4a1 1 0 0 1-1 1H4M20 9h-4a1 1 0 0 1-1-1V4M15 20v-4a1 1 0 0 1 1-1h4M4 15h4a1 1 0 0 1 1 1v4" />
-  </Svg>
-)
-
 export const Plus = (p) => (
   <Svg {...p}>
     <path d="M12 5v14M5 12h14" />
-  </Svg>
-)
-
-export const Minus = (p) => (
-  <Svg {...p}>
-    <path d="M5 12h14" />
   </Svg>
 )
 
@@ -101,11 +81,11 @@ export const Trash = (p) => (
   </Svg>
 )
 
-export const Users = (p) => (
+export const More = (p) => (
   <Svg {...p}>
-    <circle cx="9" cy="8.5" r="3" />
-    <path d="M3.5 19a5.5 5.5 0 0 1 11 0" />
-    <path d="M15.5 5.8a3 3 0 0 1 0 5.4M17.5 14.2A5.5 5.5 0 0 1 20.5 19" />
+    <circle cx="6" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="18" cy="12" r="1.4" fill="currentColor" stroke="none" />
   </Svg>
 )
 

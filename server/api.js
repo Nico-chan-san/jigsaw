@@ -226,6 +226,22 @@ function createApi(dbFile) {
     deleteTray: db.prepare('DELETE FROM trays WHERE room_id = ? AND id = ?'),
     deleteTrays: db.prepare('DELETE FROM trays WHERE room_id = ?'),
     player: db.prepare('SELECT id, name FROM players WHERE id = ?'),
+    profile: db.prepare('SELECT id, name, created FROM players WHERE id = ?'),
+    // The jigsaws a player made, connected pieces in or spent time in, with their share of each.
+    // Private ones only when the asking player (?2) has the link too.
+    playerRooms: db.prepare(`
+      WITH mine AS (SELECT room_id, COUNT(*) AS cells FROM pieces WHERE "by" = ?1 GROUP BY room_id)
+      SELECT r.id, r.name, r.created, r.thumb, r.owner, r.private, r.units,
+             (SELECT COUNT(*) FROM pieces p WHERE p.room_id = r.id) AS total,
+             (SELECT COUNT(DISTINCT p.g) FROM pieces p WHERE p.room_id = r.id) AS groups,
+             (SELECT COALESCE(SUM(t.seconds), 0) FROM times t WHERE t.room_id = r.id) AS seconds,
+             COALESCE(m.cells, 0) AS cells, COALESCE(t.seconds, 0) AS theirs, COALESCE(t.seen, 0) AS seen
+      FROM rooms r
+      LEFT JOIN mine m ON m.room_id = r.id
+      LEFT JOIN times t ON t.room_id = r.id AND t.user = ?1
+      WHERE (r.owner = ?1 OR m.cells > 0 OR t.seconds > 0)
+        AND (r.private = 0 OR r.id IN (SELECT room_id FROM room_players WHERE player_id = ?2))
+      ORDER BY t.seen DESC, r.created DESC`),
     // A passphrase, or the token of a device logged in with an email and password.
     playerBySecret: db.prepare(`
       SELECT id, name, email FROM players WHERE secret = ?1
@@ -504,6 +520,27 @@ function createApi(dbFile) {
         if (!who) return send(res, 403, { error: 'log in to invite players' })
         const list = q.invitable.all(url.searchParams.get('room') || '', who.id)
         return send(res, 200, list.map((p) => ({ ...p, joined: !!p.joined })))
+      }
+
+      // /api/players/:id: a player's name and the jigsaws they have played. Private jigsaws only
+      // show to players who have them too, known by their passphrase as for the jigsaws list.
+      if (parts[0] === 'players' && parts.length === 2 && req.method === 'GET') {
+        const p = q.profile.get(parts[1])
+        if (!p) return send(res, 404, { error: 'not found' })
+        const who = req.headers['x-passphrase'] ? q.playerBySecret.get(hashSecret(req.headers['x-passphrase'])) : null
+        const rooms = q.playerRooms.all(p.id, who?.id || '').map(({ units, total, cells, theirs, ...r }) => {
+          const n = units > 0 ? units : total
+          return {
+            ...r,
+            n,
+            progress: n > 1 ? (n - r.groups) / (n - 1) : 0,
+            done: n > 0 && r.groups === 1,
+            // Pieces they connected. Big pieces are stored per cell, so those are scaled down.
+            pieces: total ? Math.round((cells * n) / total) : 0,
+            time: theirs,
+          }
+        })
+        return send(res, 200, { ...p, rooms })
       }
 
       // /api/players: sign up with a name, log in with a passphrase, rename.

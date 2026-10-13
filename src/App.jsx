@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import RoomsDialog from './pages/Rooms.jsx'
 import Room from './pages/Room.jsx'
 import Settings from './components/Settings.jsx'
+import Tooltips from './components/Tooltips.jsx'
 import AccountPrompt from './components/Account.jsx'
 import { api } from './lib/api.js'
 import { useLinger } from './lib/linger.js'
@@ -254,6 +255,7 @@ export default function App() {
 
   return (
     <Ctx.Provider value={ctx}>
+      <Tooltips />
       {roomId ? (
         <Room key={roomId} id={roomId} />
       ) : (

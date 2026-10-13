@@ -276,7 +276,7 @@ export function NoteButton({ createRef, hint }) {
       ghost="note-ghost"
       label="Note"
       shortcut="N"
-      title="Drag a note onto the board (N)"
+      title="Drag a note onto the board"
     >
       <NoteIcon />
       {hint}

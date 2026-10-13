@@ -9,7 +9,7 @@ import { formatTime } from '../lib/time.js'
 
 // A jigsaw in the list: its picture fills the card, with the title, time, pieces and progress over
 // the bottom of it.
-function Card({ r, mine, onOpen, onDelete }) {
+export function Card({ r, mine, onOpen, onDelete }) {
   const pct = Math.round(r.progress * 100)
   return (
     <a

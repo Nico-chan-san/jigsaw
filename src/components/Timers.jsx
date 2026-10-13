@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
-import { Users } from './icons.jsx'
 
 const FLUSH_MS = 15000
 
@@ -71,6 +70,6 @@ export default function Timers({ roomId, me: name, initial, busRef, stopped, onT
     }
   }, [roomId, name, busRef])
 
-  // The header button is just the players icon: the times are in the players list.
-  return <Users />
+  // Nothing to show: the times are in the player circles (see Players.jsx).
+  return null
 }

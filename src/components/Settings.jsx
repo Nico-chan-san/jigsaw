@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from '../App.jsx'
-import { Changelog as ChangelogIcon, External, Gear, GitHub, Lock, Logout, Moon, Sound, User, Wrench } from './icons.jsx'
+import {
+  Changelog as ChangelogIcon,
+  External,
+  Gear,
+  GitHub,
+  Help,
+  Lock,
+  Logout,
+  Moon,
+  Sound,
+  User,
+  Wrench,
+} from './icons.jsx'
 import Changelog from './Changelog.jsx'
 import AccountDialog, { LogoutConfirm } from './AccountDialog.jsx'
 import { useLinger } from '../lib/linger.js'
@@ -9,7 +21,8 @@ import PrivateRoom from './PrivateRoom.jsx'
 // Header button that toggles a small settings panel: account, dark mode, sounds, changelog, source link and log out.
 // In development (npm run dev) it also has the dev menu switch.
 // In a private jigsaw it also has a button that shows its link.
-export default function Settings({ privateRoom = false }) {
+// In a jigsaw it also has how to play (onHelp).
+export default function Settings({ privateRoom = false, onHelp }) {
   const { theme, toggleTheme, sound, toggleSound, devMenu, toggleDevMenu, player, roomId } = useApp()
   const [sharing, setSharing] = useState(false)
   const closeSharing = useCallback(() => setSharing(false), [])
@@ -45,7 +58,7 @@ export default function Settings({ privateRoom = false }) {
         onClick={() => setOpen((o) => !o)}
         aria-label="Settings"
         aria-expanded={open}
-        title="Settings"
+        data-tip="Settings"
       >
         <Gear />
       </button>
@@ -74,6 +87,21 @@ export default function Settings({ privateRoom = false }) {
             >
               <Lock />
               <span>Private room</span>
+            </button>
+          )}
+          {onHelp && (
+            <button
+              className="settings-row"
+              role="menuitem"
+              aria-keyshortcuts="H"
+              onClick={() => {
+                setOpen(false)
+                onHelp()
+              }}
+            >
+              <Help />
+              <span>How to play</span>
+              <kbd className="settings-key">H</kbd>
             </button>
           )}
           <button className="settings-row" role="menuitemcheckbox" aria-checked={dark} onClick={toggleTheme}>

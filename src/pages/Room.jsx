@@ -3,14 +3,8 @@ import { api } from '../lib/api.js'
 import { Engine } from '../lib/engine.js'
 import { navigate, store, useApp } from '../App.jsx'
 import {
-  ExitFullscreen,
-  Fit,
-  Fullscreen,
   Hand,
-  Help as HelpIcon,
-  Minus,
   Picture,
-  Plus,
   Redo,
   Rooms,
   Share,
@@ -31,7 +25,7 @@ import ContextMenu from '../components/ContextMenu.jsx'
 import { TrayButton } from '../components/Trays.jsx'
 import { renderShare, shareImage } from '../lib/share.js'
 import { playSnap } from '../lib/sound.js'
-import { canFullscreen, fullscreenEl, toggleFullscreen, useFullscreen, useNotch } from '../lib/fullscreen.js'
+import { canFullscreen, fullscreenEl, toggleFullscreen, useNotch } from '../lib/fullscreen.js'
 
 // A shortcut key shown in the corner of the button it belongs to.
 const KeyHint = ({ k }) => (
@@ -57,7 +51,7 @@ function useIdle() {
     let timer = 0
     let over = false
     let touch = false
-    const busy = () => over || touch || document.querySelector('.modal-bg, .settings-menu, .float :focus-visible')
+    const busy = () => over || touch || document.querySelector('.modal-bg, .settings-menu, .players-menu, .float :focus-visible, .players :focus-visible')
     const sleep = () => (busy() ? (timer = setTimeout(sleep, IDLE_MS)) : setIdle(true))
     const wake = (e) => {
       if (e.type !== 'keydown') over = !!e.target?.closest?.('.float, .players, .podium-btn, .share-btn')
@@ -128,10 +122,8 @@ export default function Room({ id }) {
   const createNote = useRef(null)
   const [stats, setStats] = useState(() => new Map())
   const [times, setTimes] = useState({})
-  // Player ids in the room right now, and when the others were last here.
+  // Player ids in the room right now.
   const [online, setOnline] = useState(() => new Set())
-  const [seen, setSeen] = useState({})
-  const [players, setPlayers] = useState(() => store.get('players') === '1')
   // Shown automatically the first time this player opens each jigsaw.
   const [help, setHelp] = useState(() => !store.get(`help:${id}`))
   const [helpShown, helpClosing] = useLinger(help)
@@ -140,7 +132,6 @@ export default function Room({ id }) {
     setHelp(false)
   }, [id])
   const onTimes = useCallback((t) => setTimes(t), [])
-  const fullscreen = useFullscreen()
   const notch = useNotch()
   const idle = useIdle()
   const [error, setError] = useState(false)
@@ -221,7 +212,6 @@ export default function Room({ id }) {
         if (dead) return
         learn(room.players)
         setOnline(new Set(room.online || []))
-        setSeen(room.seen || {})
         eng.setColors(readColors())
         setStats(eng.contributors())
         setDone(eng.isComplete())
@@ -241,7 +231,6 @@ export default function Room({ id }) {
               eng.invalidate()
             } else if (msg.type === 'presence') {
               setOnline(new Set(msg.online || []))
-              setSeen((s) => ({ ...s, ...msg.seen }))
             } else if (msg.type === 'time') timeBus.current?.(msg)
             else if (msg.type === 'note' || msg.type === 'note-delete') noteBus.current?.(msg)
             else if (msg.type === 'react') reactBus.current?.(msg)
@@ -260,7 +249,6 @@ export default function Room({ id }) {
             eng.setTrays(fresh.trays || [])
             learn(fresh.players)
             setOnline(new Set(fresh.online || []))
-            setSeen(fresh.seen || {})
             noteBus.current?.({ type: 'notes-reset', notes: fresh.notes || [] })
           },
         })
@@ -312,10 +300,6 @@ export default function Room({ id }) {
   }, [engine, panMode])
 
   useEffect(() => {
-    store.set('players', players ? '1' : '0')
-  }, [players])
-
-  useEffect(() => {
     if (error) navigate('/rooms')
   }, [error])
 
@@ -335,7 +319,7 @@ export default function Room({ id }) {
     return () => window.removeEventListener('keydown', key, true)
   }, [engine])
 
-  // Other players only see our cursor while we're playing, not not while a dialog is open.
+  // Other players only see our cursor while we're playing, not while a dialog is open.
   useEffect(() => {
     if (!engine) return
     const check = () => engine.setAway(!!document.querySelector('.modal-bg'))
@@ -345,7 +329,7 @@ export default function Room({ id }) {
     return () => mo.disconnect()
   }, [engine])
 
-  // H help, V view mode, P players, N note, T tray, I image, + and - zoom, C centres, F fullscreen. Arrow keys and WASD pan (see the engine). New notes, trays and images go under the pointer when it's on the table.
+  // H help, V view mode, N note, T tray, I image, + and - zoom, C fits to screen, F fullscreen. Arrow keys and WASD pan (see the engine). New notes, trays and images go under the pointer when it's on the table.
   useEffect(() => {
     if (!engine) return
     const key = (e) => {
@@ -360,7 +344,6 @@ export default function Room({ id }) {
       const k = e.key.toLowerCase()
       if (k === 'h') setHelp(true)
       else if (k === 'v') setPanMode((v) => !v)
-      else if (k === 'p') setPlayers((s) => !s)
       else if (k === 'n') createNote.current?.(over ? over[0] + r.left : null, over ? over[1] + r.top : null)
       else if (k === 't') (over ? engine.addTray(...over) : engine.addTray())
       else if (k === 'i') (over ? engine.addRef(...over) : engine.addRef())
@@ -378,17 +361,17 @@ export default function Room({ id }) {
   // The toolbar buttons, in four groups: in the corners and at the top middle, where the play tools
   // are three bars side by side.
   const nav = (
-    <button className="icon-btn" onClick={() => setDialog('rooms')} aria-label="All jigsaws" title="All jigsaws">
+    <button className="icon-btn" onClick={() => setDialog('rooms')} aria-label="All jigsaws" data-tip="All jigsaws">
       <Rooms />
     </button>
   )
   const play = engine && (
     <>
       <div className="float">
-        <button className="icon-btn" onClick={() => engine.undo()} disabled={!hist.undo} aria-label="Undo" aria-keyshortcuts="Control+Z Meta+Z" title={`Undo (${MOD}Z)`}>
+        <button className="icon-btn" onClick={() => engine.undo()} disabled={!hist.undo} aria-label="Undo" aria-keyshortcuts="Control+Z Meta+Z" data-tip="Undo" data-key={`${MOD}Z`}>
           <Undo />
         </button>
-        <button className="icon-btn" onClick={() => engine.redo()} disabled={!hist.redo} aria-label="Redo" aria-keyshortcuts="Control+Shift+Z Meta+Shift+Z" title={`Redo (${MOD}${REDO_KEY})`}>
+        <button className="icon-btn" onClick={() => engine.redo()} disabled={!hist.redo} aria-label="Redo" aria-keyshortcuts="Control+Shift+Z Meta+Shift+Z" data-tip="Redo" data-key={`${MOD}${REDO_KEY}`}>
           <Redo />
         </button>
       </div>
@@ -399,7 +382,8 @@ export default function Room({ id }) {
           aria-pressed={panMode}
           aria-label="View mode"
           aria-keyshortcuts="V"
-          title={panMode ? 'View mode on: dragging moves the table (V)' : 'View mode: drag to move the table (V)'}
+          data-tip={panMode ? 'View mode on: dragging moves the table' : 'View mode: drag to move the table'}
+          data-key="V"
         >
           <Hand />
           <KeyHint k="V" />
@@ -413,7 +397,8 @@ export default function Room({ id }) {
           onClick={() => engine.addRef()}
           aria-label="Reference image"
           aria-keyshortcuts="I"
-          title="Add the reference image to the board (I)"
+          data-tip="Add the reference image to the board"
+          data-key="I"
         >
           <Picture />
           <KeyHint k="I" />
@@ -424,74 +409,10 @@ export default function Room({ id }) {
   )
   const account = (
     <>
-      <button
-        className="icon-btn"
-        onClick={() => setHelp(true)}
-        aria-label="How to play"
-        aria-keyshortcuts="H"
-        title="How to play (H)"
-      >
-        <HelpIcon />
-        <KeyHint k="H" />
-      </button>
-      {engine && (
-        <button
-          className={`icon-btn${players ? ' on' : ''}`}
-          onClick={() => setPlayers((s) => !s)}
-          aria-pressed={players}
-          aria-label="Players"
-          aria-keyshortcuts="P"
-          title={players ? 'Hide players (P)' : 'Show players (P)'}
-        >
-          <Timers roomId={id} me={playerId} initial={data.times} busRef={timeBus} stopped={done} onTimes={onTimes} />
-          <KeyHint k="P" />
-        </button>
-      )}
-      <Settings privateRoom={!!data?.private} />
+      {engine && <Timers roomId={id} me={playerId} initial={data.times} busRef={timeBus} stopped={done} onTimes={onTimes} />}
+      <Settings privateRoom={!!data?.private} onHelp={() => setHelp(true)} />
     </>
   )
-  const zoom = (
-    <>
-      <button
-        className="icon-btn"
-        onClick={() => engine?.zoomBy(1 / 1.4)}
-        aria-label="Zoom out"
-        aria-keyshortcuts="-"
-        title="Zoom out (-)"
-      >
-        <Minus />
-        <KeyHint k="-" />
-      </button>
-      <button className="icon-btn" onClick={() => engine?.fit()} aria-label="Fit" aria-keyshortcuts="C" title="Fit to screen (C)">
-        <Fit />
-        <KeyHint k="C" />
-      </button>
-      <button
-        className="icon-btn"
-        onClick={() => engine?.zoomBy(1.4)}
-        aria-label="Zoom in"
-        aria-keyshortcuts="+"
-        title="Zoom in (+)"
-      >
-        <Plus />
-        <KeyHint k="+" />
-      </button>
-    </>
-  )
-  const full = canFullscreen() && (
-    <button
-      className={`icon-btn${fullscreen ? ' on' : ''}`}
-      onClick={toggleFullscreen}
-      aria-pressed={fullscreen}
-      aria-label="Fullscreen"
-      aria-keyshortcuts="F"
-      title={fullscreen ? 'Leave fullscreen (F)' : 'Fullscreen (F)'}
-    >
-      {fullscreen ? <ExitFullscreen /> : <Fullscreen />}
-      <KeyHint k="F" />
-    </button>
-  )
-
   return (
     <div
       className={`room${panMode ? ' pan-mode' : ''}${idle ? ' idle' : ''}${notch ? ' notch' : ''}`}
@@ -526,11 +447,10 @@ export default function Room({ id }) {
       <canvas ref={cursors} className="cursors" />
       <div className="float tl">{nav}</div>
       {play && <div className="play-tools tc">{play}</div>}
-      <div className="br">
-        <div className="float">{zoom}</div>
-        {full && <div className="float">{full}</div>}
+      <div className="tr">
+        {engine && <Players stats={stats} times={times} me={playerId} owner={data?.owner} nameOf={nameOf} online={online} />}
+        <div className="float">{account}</div>
       </div>
-      <div className="float tr">{account}</div>
       {menu && engine && <ContextMenu key={`${menu.kind}:${menu.id}:${menu.x}:${menu.y}`} engine={engine} at={menu} onClose={closeMenu} />}
       {helpShown && <Help onClose={closeHelp} closing={helpClosing} />}
       {party && <Celebration key={partyKey} onDone={endParty} />}
@@ -556,7 +476,7 @@ export default function Room({ id }) {
         />
       )}
       {engine && done && (
-        <button className="podium-btn" onClick={() => setPodium(true)} aria-label="Podium" title="Top players">
+        <button className="podium-btn" onClick={() => setPodium(true)} aria-label="Podium" data-tip="Top players">
           <PodiumIcon />
         </button>
       )}
@@ -573,7 +493,7 @@ export default function Room({ id }) {
             if (result) setTimeout(() => setShared(null), 2500)
           }}
           aria-label="Share"
-          title={shared === 'copied' ? 'Copied to the clipboard' : shared === 'saved' ? 'Saved as an image' : 'Copy a picture of the finished jigsaw and the podium'}
+          data-tip={shared === 'copied' ? 'Copied to the clipboard' : shared === 'saved' ? 'Saved as an image' : 'Copy a picture of the finished jigsaw and the podium'}
         >
           {shared ? <Check /> : <Share />}
         </button>
@@ -590,7 +510,6 @@ export default function Room({ id }) {
           onClose={closePodium}
         />
       )}
-      {engine && <Players open={players} stats={stats} times={times} me={playerId} owner={data?.owner} nameOf={nameOf} online={online} seen={seen} />}
     </div>
   )
 }

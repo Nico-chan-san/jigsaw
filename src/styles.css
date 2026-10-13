@@ -108,6 +108,10 @@ button {
   background: var(--fg);
   color: var(--bg);
 }
+/* A button that's on keeps its fill under the pointer, a shade lighter. */
+.icon-btn.on:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 85%, var(--bg));
+}
 .icon-btn svg {
   width: 18px;
   height: 18px;
@@ -127,38 +131,30 @@ button {
   top: 16px;
   left: 16px;
 }
-.float.tr {
-  top: 16px;
-  right: 16px;
-}
-/* The bottom right controls: zoom, and fullscreen, as separate groups. */
-.br {
+/* The top right: the player circles (see Players.jsx), then the account buttons. */
+.tr {
   position: absolute;
-  bottom: 16px;
+  top: 16px;
   right: 16px;
   z-index: 5;
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
 }
-.br > .float {
+.tr > .float {
   position: static;
 }
-
 /* After a few seconds without the pointer or keyboard (see Room.jsx), the controls fade away. */
 .room .float,
+.room .players,
 .room .podium-btn,
 .room .share-btn {
   transition: opacity 0.2s ease;
 }
-.room .players {
-  transition:
-    transform 0.22s ease,
-    opacity 0.2s ease;
-}
 .room.idle .float,
+.room.idle .players,
 .room.idle .podium-btn,
-.room.idle .share-btn,
-.room.idle .players {
+.room.idle .share-btn {
   opacity: 0;
   pointer-events: none;
 }
@@ -299,7 +295,8 @@ button {
 }
 /* The list reaches into the window's padding, so the shadow of a lifted card isn't cut off at
    its edges. */
-.sheet .dialog-body {
+.sheet .dialog-body,
+.profile .dialog-body {
   margin: -12px -16px -20px -22px;
   padding: 12px 16px 32px 22px;
 }
@@ -1431,94 +1428,405 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   }
 }
 
-/* ---- players panel ---- */
+/* ---- players (see Players.jsx and PlayerDialog.jsx) ---- */
 
+/* The first few players as circles in the header, on their own without a panel behind them, then
+   ... for everyone. */
 .players {
-  position: absolute;
-  top: 68px;
-  right: 16px;
-  z-index: 5;
-  width: 300px;
-  max-height: calc(100% - 140px);
-  overflow-y: auto;
-  padding: 12px 8px 8px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--panel);
-  transform: translateX(calc(100% + 24px));
-  transition: transform 0.22s ease;
-  scrollbar-width: thin;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
-.players.open {
-  transform: none;
-}
-.players .label {
-  padding: 0 8px 8px;
-}
-.players ol {
+.player-dots {
+  display: flex;
   margin: 0;
   padding: 0;
   list-style: none;
-  counter-reset: rank;
 }
-.players li {
+.player-dots li {
+  position: relative;
+}
+/* Each circle overlaps the one before a little, the first on top. */
+.player-dots li + li {
+  margin-left: -6px;
+}
+.player-dots li:nth-child(1) { z-index: 5; }
+.player-dots li:nth-child(2) { z-index: 4; }
+.player-dots li:nth-child(3) { z-index: 3; }
+.player-dots li:nth-child(4) { z-index: 2; }
+.player-dots li:nth-child(5) { z-index: 1; }
+.player-btn {
+  display: block;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  transition: transform 0.15s ease;
+}
+.player-btn:hover,
+.player-btn:focus-visible {
+  position: relative;
+  z-index: 6;
+  transform: translateY(-2px);
+}
+.player-btn:focus-visible {
+  outline: 2px solid var(--sel);
+  outline-offset: 2px;
+}
+.player-dot {
+  flex: none;
   display: grid;
-  grid-template-columns: 22px 1fr auto;
-  grid-template-areas: 'rank name stats';
-  align-items: center;
-  column-gap: 6px;
-  padding: 8px;
-  border-radius: 8px;
-  counter-increment: rank;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  box-sizing: border-box;
+  border: 2px solid var(--canvas);
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: 0 1px 4px var(--shadow);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  user-select: none;
 }
-.players li::before {
-  content: counter(rank);
-  grid-area: rank;
-  align-self: start;
+/* Your own circle: a small You tag across its bottom edge. */
+.player-dot.you {
+  position: relative;
+}
+.player-dot.you::after {
+  content: 'You';
+  position: absolute;
+  bottom: -7px;
+  left: 50%;
+  padding: 1px 4px;
+  border-radius: 999px;
+  background: var(--fg);
+  color: var(--bg);
+  font: 700 8px/1.2 ui-sans-serif, system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transform: translateX(-50%);
+}
+.player-dot.big.you::after {
+  bottom: -8px;
+  padding: 2px 6px;
+  font-size: 10px;
+}
+/* "(you)" after your name in lists and cards. */
+.you-label {
+  color: var(--muted);
+  font-weight: 400;
+}
+/* Here now: a ring in their colour, apart from the circle. */
+.player-dot.online {
+  border-color: var(--c);
+  box-shadow:
+    inset 0 0 0 2px var(--canvas),
+    0 1px 4px var(--shadow);
+}
+.player-dot.big {
+  width: 64px;
+  height: 64px;
+  border-width: 3px;
+  font-size: 22px;
+}
+.player-dot.big.online {
+  box-shadow:
+    inset 0 0 0 3px var(--bg),
+    0 2px 8px var(--shadow);
+}
+.player-dot.big:not(.online) {
+  border-color: var(--bg);
+}
+.more-btn {
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel);
+}
+.more-btn:hover:not(:disabled) {
+  background: var(--panel);
+  filter: brightness(0.96);
+}
+
+/* The card that shows while the pointer rests on a circle. */
+.player-card {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: -8px;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 220px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px var(--shadow);
+  font-size: 13px;
+  pointer-events: none;
+  animation: pop 0.14s ease;
+}
+.player-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.player-card-head > div {
+  min-width: 0;
+}
+.player-card .player-dot.online {
+  box-shadow: inset 0 0 0 2px var(--bg);
+}
+.player-card .player-dot:not(.online) {
+  border-color: var(--bg);
+  box-shadow: none;
+}
+.player-card-name {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.player-card-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: var(--muted);
   font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  line-height: 20px;
 }
-.players li.me {
+.player-card-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.player-card-row svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+.player-card-row.owner svg,
+.profile-stat.owner svg,
+.powner,
+.profile-share svg.crown {
+  color: #e5a50a;
+}
+/* A dot by "Here now" or "Away". */
+.presence {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+.presence.here {
+  background: #30a46c;
+}
+
+/* Everyone, under the ... button. */
+.players-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: -4px;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 300px;
+  max-height: min(420px, calc(100dvh - 90px));
+  overflow-y: auto;
+  padding: 12px 6px 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px var(--shadow);
+  animation: pop 0.14s ease;
+  scrollbar-width: thin;
+}
+/* All players' time together, at the top of the list. */
+.players-total {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 10px;
+  padding: 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.players-total svg {
+  width: 14px;
+  height: 14px;
+}
+.players-menu .label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  padding: 0 8px 6px;
+}
+.players-menu section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.players-menu section + section {
+  margin-top: 10px;
+}
+.players-menu .label .n {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  opacity: 0.7;
+}
+.players-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.players-row:hover,
+.players-row.me {
   background: var(--hover);
 }
-.players li.me .pname {
-  font-weight: 600;
+.players-row .player-dot {
+  width: 30px;
+  height: 30px;
+  font-size: 12px;
+  box-shadow: none;
+}
+.players-row .player-dot:not(.online) {
+  border-color: transparent;
+}
+.players-row .player-dot.online {
+  box-shadow: inset 0 0 0 2px var(--bg);
 }
 .pname {
-  grid-area: name;
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.pstats {
-  grid-area: stats;
+.powner {
   display: inline-flex;
-  gap: 10px;
+  margin-left: 5px;
+  vertical-align: -2px;
 }
-.pstats span {
+.powner svg,
+.pstat svg {
+  width: 14px;
+  height: 14px;
+}
+.pstat {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   font-variant-numeric: tabular-nums;
 }
+.pstat svg {
+  color: var(--muted);
+}
 .ptime {
-  min-width: 52px;
+  min-width: 58px;
   justify-content: flex-end;
 }
-.pstats svg {
-  width: 14px;
-  height: 14px;
+
+/* A player's window. */
+.modal.profile {
+  width: min(760px, 100%);
+}
+.profile-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.profile-who {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.profile-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 500;
+}
+.profile-since {
+  color: var(--muted);
+  font-size: 13px;
+}
+.profile .label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+.profile .label .n {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  opacity: 0.7;
+}
+.profile-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.profile-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+.profile-stat svg {
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
+}
+.profile-room {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* What they did in a jigsaw, under its card. */
+.profile-share {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.profile-share > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.profile-share svg {
+  width: 13px;
+  height: 13px;
+}
+.profile-empty {
+  margin: 0;
   color: var(--muted);
 }
 
-@media (max-width: 640px) {
-  .players {
-    top: 120px;
-    width: 220px;
-  }
-}
 /* ---- help dialog ---- */
 
 .modal.help {
@@ -1641,6 +1949,41 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   .help-body {
     grid-template-columns: 1fr;
   }
+}
+
+/* ---- button hover cards (see Tooltips.jsx) ---- */
+
+.ui-tip {
+  position: fixed;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 280px;
+  padding: 7px 8px 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px var(--shadow);
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.35;
+  pointer-events: none;
+  animation: pop 0.12s ease;
+}
+.ui-tip:not(:has(kbd)) {
+  padding-right: 11px;
+}
+.ui-tip kbd {
+  flex: none;
+  min-width: 20px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  color: var(--muted);
+  font: 600 11px/1.2 ui-sans-serif, system-ui, -apple-system, sans-serif;
+  text-align: center;
 }
 
 /* ---- shortcut hints ---- */
@@ -1841,6 +2184,10 @@ button.link:hover {
 .qr {
   width: min(240px, 100%);
   border-radius: 8px;
+}
+.settings-key {
+  color: var(--muted);
+  font: 600 11px/1 ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 .settings-row svg.settings-ext {
   width: 14px;
@@ -2069,17 +2416,6 @@ button.link:hover {
   overflow-wrap: anywhere;
 }
 
-/* The jigsaw's creator in the players panel. */
-.pcreator {
-  display: inline-flex;
-  margin: -2px 5px 0 0;
-  vertical-align: middle;
-  color: #e5a50a;
-}
-.pcreator svg {
-  width: 14px;
-  height: 14px;
-}
 
 /* ---- invites ---- */
 
@@ -2260,19 +2596,6 @@ button.link:hover {
     0 0 0 4px var(--c);
 }
 
-/* Total time, under the players list heading. */
-.players .ptotal {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 8px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-.players .ptotal svg {
-  width: 14px;
-  height: 14px;
-}
 
 /* Next to the podium button: copies a picture of the finished jigsaw and the podium. */
 .share-btn {

@@ -30,7 +30,7 @@ export default function PlaceButton({ onPlace, ghost, label, shortcut, title, ch
 
   return (
     <>
-      <button className="icon-btn" onPointerDown={down} aria-label={label} aria-keyshortcuts={shortcut} title={title}>
+      <button className="icon-btn" onPointerDown={down} aria-label={label} aria-keyshortcuts={shortcut} data-tip={title} data-key={shortcut}>
         {children}
       </button>
       {at &&

@@ -26,6 +26,10 @@ export const api = {
   // Private jigsaws are only listed for the player who opened them, known by their passphrase.
   rooms: (passphrase) => fetch('/api/rooms', { headers: passphrase ? { 'X-Passphrase': passphrase } : {} }).then(json),
   room: (id) => fetch(`/api/rooms/${id}`).then(json),
+  // A player and the jigsaws they have played: { id, name, created, rooms }. Private ones only come
+  // back when this player (known by their passphrase) has them too.
+  player: (id, passphrase) =>
+    fetch(`/api/players/${encodeURIComponent(id)}`, { headers: passphrase ? { 'X-Passphrase': passphrase } : {} }).then(json),
   // Players with an email who can be invited to a private jigsaw, as [{ id, name, joined }].
   invitable: (passphrase, room = '') =>
     fetch(`/api/players/invitable?room=${encodeURIComponent(room)}`, { headers: { 'X-Passphrase': passphrase } }).then(

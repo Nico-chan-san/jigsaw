@@ -9,7 +9,7 @@ export function TrayButton({ engine, hint }) {
     engine.addTray(x - r.left, y - r.top)
   }
   return (
-    <PlaceButton onPlace={place} ghost="tray-ghost" label="Tray" shortcut="T" title="Drag a tray onto the board (T)">
+    <PlaceButton onPlace={place} ghost="tray-ghost" label="Tray" shortcut="T" title="Drag a tray onto the board">
       <TrayIcon />
       {hint}
     </PlaceButton>
