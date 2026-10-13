@@ -1,5 +1,10 @@
 # Changelog
 
+## 13 October 2026
+
+- Spectator mode is gone, along with its switch in the settings menu.
+- The shadow under a jigsaw in the all jigsaws window is no longer cut off at the edges of the list.
+
 ## 9 October 2026
 
 - Images can be trimmed: choose **Trim** in an image's menu (**⋯** or right click) and drag over the part you want to keep. The rest is hidden and the part you kept stays where it was. Trim again to narrow it down further, or choose **Show whole image** to get the whole picture back. **Esc** cancels.

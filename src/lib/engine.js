@@ -15,10 +15,8 @@ const ease = (dt, ms) => 1 - Math.exp(-dt / ms)
 const r2 = (v) => Math.round(v * 100) / 100
 // Live drag updates are throttled to this interval (ms).
 const LIVE_MS = 33
-// How many live updates of a carry are kept for the spectator's replay (about eight seconds).
-const TRACE_FRAMES = 240
 // The burst where two pieces join: how long it lasts, after waiting for the pieces to land.
-export const POP_MS = 520
+const POP_MS = 520
 const POP_DELAY = 80
 const MAX_POPS = 12
 // Pieces held with a finger ride this far (screen px) above it, so the finger doesn't hide them.
@@ -183,12 +181,6 @@ export class Engine {
       if (!live) this.trackObj('tray', tray.id, tray)
     }
     this.onTrayDelete = onTrayDelete
-    // Spectator mode (see spectate.js): when set, it draws the table in its own screens instead of
-    // the one view, and this player neither plays nor shows a cursor.
-    this.spectator = null
-    // How other players carried pieces just before putting them down: client -> { ids, ox, oy, r0,
-    // frames: [{ t, px, py, k }] }, kept for the spectator's replays.
-    this.traces = new Map()
     // Called with (cam, vw, vh) whenever the view changes, see addView().
     this.views = new Set()
     this.viewsVer = 0
@@ -482,8 +474,7 @@ export class Engine {
     this.vw = Math.max(1, rect.width)
     this.vh = Math.max(1, rect.height)
     for (const c of [this.canvas, this.gpuEl, this.gpuTop, this.overlay]) {
-      // The spectator sizes the GPU canvases itself, to one screen at a time.
-      if (!c || (this.spectator && (c === this.gpuEl || c === this.gpuTop))) continue
+      if (!c) continue
       c.width = Math.round(this.vw * this.dpr)
       c.height = Math.round(this.vh * this.dpr)
     }
@@ -494,31 +485,6 @@ export class Engine {
   setColors(colors) {
     this.colors = colors
     this.invalidate()
-  }
-
-  // Starts or stops spectator mode, see spectate.js.
-  setSpectator(s) {
-    this.spectator = s
-    if (s) {
-      this.setSelection(new Set())
-      this.selectRef(null)
-      this.selectTray(null)
-      this.setHighlight(null)
-      this.showTip(null)
-    } else {
-      this.dirty = true
-      this.resize()
-    }
-    this.invalidate()
-  }
-
-  // Sizes the GPU canvases for one spectator screen, in device pixels. Nothing happens if they
-  // already have that size.
-  setGpuSize(w, h) {
-    for (const c of [this.gpuEl, this.gpuTop]) {
-      if (c.width !== w) c.width = w
-      if (c.height !== h) c.height = h
-    }
   }
 
   // Asks for a frame.
@@ -1384,7 +1350,6 @@ export class Engine {
   }
 
   onKey(e) {
-    if (this.spectator) return
     if (e.target?.closest?.('input, textarea, [contenteditable]')) return
     // Dialogs over the board keep the keyboard.
     if (document.querySelector('.modal-bg')) return
@@ -1705,7 +1670,7 @@ export class Engine {
 
   // After pieces moved (ids) and the groups were g0 before: finds every new seam, where two
   // neighbours that were apart are now in one group, and marks it with a burst and a sound.
-  joined(g0, ids, local, who) {
+  joined(g0, ids, local) {
     const { cols } = this.room
     const set = ids instanceof Set ? ids : new Set(ids)
     // Where a piece is going, if it's still easing there.
@@ -1724,10 +1689,6 @@ export class Engine {
     }
     if (!seams.length) return
     this.onSnap?.({ seams: seams.length, local })
-    if (who && this.spectator) {
-      const at = seams.reduce((a, s) => [a[0] + s[0] / seams.length, a[1] + s[1] / seams.length], [0, 0])
-      this.spectator.snapped({ client: who.client, trace: who.trace, ids: [...set], at, seams: seams.length })
-    }
     if (calm?.matches) return
     // A long edge joining at once gets a few bursts spread along it, not one per seam.
     const step = Math.max(1, seams.length / MAX_POPS)
@@ -2474,25 +2435,17 @@ export class Engine {
         }
       }
       this.remote.set(msg.client, d)
-      if (this.spectator) this.traces.set(msg.client, { ids: msg.ids, ox: msg.ox, oy: msg.oy, r0: msg.r0, frames: [] })
       this.rlift.set(msg.client, { ids: d.ids, set: new Set(d.ids), value: this.rlift.get(msg.client)?.value || 0, target: 1, tray: !!msg.tray })
       this.toTop(new Set(d.ids))
       this.remoteLive(d, msg.px, msg.py, msg.k | 0, now)
     } else if (msg.type === 'live') {
       const d = this.remote.get(msg.client)
       if (d) this.remoteLive(d, msg.px, msg.py, msg.k | 0, now)
-      const tr = this.traces.get(msg.client)
-      if (tr && isFinite(msg.px) && isFinite(msg.py)) {
-        tr.frames.push({ t: now, px: msg.px, py: msg.py, k: msg.k | 0 })
-        if (tr.frames.length > TRACE_FRAMES) tr.frames.shift()
-      }
     } else if (msg.type === 'moves') {
       this.remote.delete(msg.client)
-      const trace = this.traces.get(msg.client)
-      this.traces.delete(msg.client)
       const rl = this.rlift.get(msg.client)
       if (rl) rl.target = 0
-      this.applyRemote(msg.pieces, msg.turns, { client: msg.client, trace })
+      this.applyRemote(msg.pieces, msg.turns)
     } else if (msg.type === 'marks') {
       this.learnPlayer(msg)
       const ok = (a) => (Array.isArray(a) ? a.filter((i) => Number.isInteger(i) && i >= 0 && i < this.n) : [])
@@ -2520,7 +2473,6 @@ export class Engine {
       this.cursors.delete(msg.client)
       this.marks.delete(msg.client)
       this.players.delete(msg.client)
-      this.traces.delete(msg.client)
       this.rlift.delete(msg.client)
       this.markNotes()
       const d = this.remote.get(msg.client)
@@ -2557,8 +2509,7 @@ export class Engine {
     this.invalidate()
   }
 
-  // who is { client, trace } for pieces another player put down: the spectator replays what led to a snap.
-  applyRemote(list, turns, who) {
+  applyRemote(list, turns) {
     const g0 = this.g.slice()
     const touched = new Set()
     for (const p of list) {
@@ -2592,7 +2543,7 @@ export class Engine {
     }
     if (touched.size) this.toTop(touched)
     this.growSelection()
-    this.joined(g0, touched, false, who)
+    this.joined(g0, touched, false)
     this.emitStats()
     this.checkComplete()
     this.invalidate()
@@ -3429,14 +3380,13 @@ export class Engine {
       } else again = true
     }
 
-    if (this.pops.length || this.spectator) again = true
+    if (this.pops.length) again = true
 
     this.draw()
     if (again) this.invalidate()
   }
 
   draw() {
-    if (this.spectator) return this.spectator.draw(this.last)
     const { ctx, cam, vw, vh } = this
     const mv = this.mv
     if (cam.x !== mv.x || cam.y !== mv.y || cam.z !== mv.z || vw !== mv.w || vh !== mv.h || this.viewsVer !== this.viewFn) {
@@ -3747,42 +3697,6 @@ export class Engine {
     }
   }
 
-  // Where the pointer was, and how far the pieces were turned, u (0 to 1) of the way through frames.
-  traceAt(f, u) {
-    const at = f[0].t + (f[f.length - 1].t - f[0].t) * u
-    let b = f.findIndex((q) => q.t >= at)
-    if (b < 0) b = f.length - 1
-    const a = Math.max(0, b - 1)
-    const m = f[b].t > f[a].t ? Math.min(1, Math.max(0, (at - f[a].t) / (f[b].t - f[a].t))) : 1
-    return {
-      px: f[a].px + (f[b].px - f[a].px) * m,
-      py: f[a].py + (f[b].py - f[a].py) * m,
-      k: m < 0.5 ? f[a].k : f[b].k,
-    }
-  }
-
-  // Draws what draw() makes with the pieces of a carry (see traces) as they were u (0 to 1) of the way
-  // through it, then puts them back where they lie. For the spectator's replays.
-  withTrace(trace, u, draw) {
-    const { ids, ox, oy, r0, frames } = trace
-    const keep = ids.map((i) => [this.x[i], this.y[i], this.r[i]])
-    const { px, py, k } = this.traceAt(frames, u)
-    // The last stretch eases into where they really ended up (the snap).
-    const land = Math.max(0, (u - 0.88) / 0.12)
-    for (let j = 0; j < ids.length; j++) {
-      const i = ids[j]
-      const [rx, ry] = rot(ox[j], oy[j], k)
-      this.x[i] = px + rx + (keep[j][0] - px - rx) * land
-      this.y[i] = py + ry + (keep[j][1] - py - ry) * land
-      this.r[i] = mod4(r0[j] + k)
-    }
-    try {
-      draw(px, py)
-    } finally {
-      for (let j = 0; j < ids.length; j++) [this.x[ids[j]], this.y[ids[j]], this.r[ids[j]]] = keep[j]
-    }
-  }
-
   // Other players' pointers, each with their name in a tag of their colour.
   // A ring and a few sparks growing out of each new seam, fading as they go. White with a soft
   // shadow, so they show on any picture.
@@ -3798,7 +3712,7 @@ export class Engine {
     return (this.pops = this.pops.filter((p) => now - p.t0 < POP_MS))
   }
 
-  // Paints bursts (pops, or the spectator's own) on ctx for a view of vw by vh with camera cam.
+  // Paints bursts on ctx for a view of vw by vh with camera cam.
   paintPops(ctx, cam, vw, vh, pops, dpr = this.dpr, scale = 1) {
     const now = performance.now()
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)

@@ -117,14 +117,6 @@ export default function App() {
       return !v
     })
   }, [])
-  // Spectator mode: the room shows each player's screen instead of the table (see lib/spectate.js).
-  const [spectate, setSpectate] = useState(() => store.get('spectate') === '1')
-  const toggleSpectate = useCallback(() => {
-    setSpectate((v) => {
-      store.set('spectate', v ? null : '1')
-      return !v
-    })
-  }, [])
   // The dev menu over the board, only in development (npm run dev). Off unless turned on.
   const [devMenu, setDevMenu] = useState(() => import.meta.env.DEV && store.get('devMenu') === '1')
   const toggleDevMenu = useCallback(() => {
@@ -242,8 +234,6 @@ export default function App() {
     toggleTheme,
     sound,
     toggleSound,
-    spectate,
-    toggleSpectate,
     devMenu,
     toggleDevMenu,
     player,

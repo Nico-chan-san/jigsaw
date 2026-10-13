@@ -24,7 +24,6 @@ import Podium, { PodiumIcon } from '../components/Podium.jsx'
 import Reactions from '../components/Reactions.jsx'
 import Timers from '../components/Timers.jsx'
 import Celebration from '../components/Celebration.jsx'
-import Spectate from '../components/Spectate.jsx'
 import DevMenu from '../components/DevMenu.jsx'
 import { useLinger } from '../lib/linger.js'
 import { NoteButton, NotesLayer } from '../components/Notes.jsx'
@@ -105,7 +104,7 @@ function takeLocalRefs(id) {
 }
 
 export default function Room({ id }) {
-  const { name, player, playerId, theme, ensureName, requireName, setDialog, devMenu, spectate } = useApp()
+  const { name, player, playerId, theme, ensureName, requireName, setDialog, devMenu } = useApp()
   const me = useRef(playerId)
   me.current = playerId
   const sockRef = useRef(null)
@@ -336,19 +335,19 @@ export default function Room({ id }) {
     return () => window.removeEventListener('keydown', key, true)
   }, [engine])
 
-  // Other players only see our cursor while we're playing, not while a dialog is open or we spectate.
+  // Other players only see our cursor while we're playing, not not while a dialog is open.
   useEffect(() => {
     if (!engine) return
-    const check = () => engine.setAway(spectate || !!document.querySelector('.modal-bg'))
+    const check = () => engine.setAway(!!document.querySelector('.modal-bg'))
     const mo = new MutationObserver(check)
     mo.observe(document.body, { childList: true, subtree: true })
     check()
     return () => mo.disconnect()
-  }, [engine, spectate])
+  }, [engine])
 
   // H help, V view mode, P players, N note, T tray, I image, + and - zoom, C centres, F fullscreen. Arrow keys and WASD pan (see the engine). New notes, trays and images go under the pointer when it's on the table.
   useEffect(() => {
-    if (!engine || spectate) return
+    if (!engine) return
     const key = (e) => {
       if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
       if (e.target?.closest?.('input, textarea, [contenteditable]')) return
@@ -374,7 +373,7 @@ export default function Room({ id }) {
     }
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
-  }, [engine, spectate])
+  }, [engine])
 
   // The toolbar buttons, in four groups: in the corners and at the top middle, where the play tools
   // are three bars side by side.
@@ -383,7 +382,7 @@ export default function Room({ id }) {
       <Rooms />
     </button>
   )
-  const play = engine && !spectate && (
+  const play = engine && (
     <>
       <div className="float">
         <button className="icon-btn" onClick={() => engine.undo()} disabled={!hist.undo} aria-label="Undo" aria-keyshortcuts="Control+Z Meta+Z" title={`Undo (${MOD}Z)`}>
@@ -425,21 +424,18 @@ export default function Room({ id }) {
   )
   const account = (
     <>
-      {!spectate && (
-        <button
-          className="icon-btn"
-          onClick={() => setHelp(true)}
-          aria-label="How to play"
-          aria-keyshortcuts="H"
-          title="How to play (H)"
-        >
-          <HelpIcon />
-          <KeyHint k="H" />
-        </button>
-      )}
+      <button
+        className="icon-btn"
+        onClick={() => setHelp(true)}
+        aria-label="How to play"
+        aria-keyshortcuts="H"
+        title="How to play (H)"
+      >
+        <HelpIcon />
+        <KeyHint k="H" />
+      </button>
       {engine && (
         <button
-          hidden={spectate}
           className={`icon-btn${players ? ' on' : ''}`}
           onClick={() => setPlayers((s) => !s)}
           aria-pressed={players}
@@ -447,7 +443,7 @@ export default function Room({ id }) {
           aria-keyshortcuts="P"
           title={players ? 'Hide players (P)' : 'Show players (P)'}
         >
-          <Timers roomId={id} me={playerId} initial={data.times} busRef={timeBus} stopped={done || spectate} onTimes={onTimes} />
+          <Timers roomId={id} me={playerId} initial={data.times} busRef={timeBus} stopped={done} onTimes={onTimes} />
           <KeyHint k="P" />
         </button>
       )}
@@ -482,7 +478,7 @@ export default function Room({ id }) {
       </button>
     </>
   )
-  const full = canFullscreen() && !spectate && (
+  const full = canFullscreen() && (
     <button
       className={`icon-btn${fullscreen ? ' on' : ''}`}
       onClick={toggleFullscreen}
@@ -498,7 +494,7 @@ export default function Room({ id }) {
 
   return (
     <div
-      className={`room${spectate ? ' spectating' : ''}${panMode ? ' pan-mode' : ''}${idle ? ' idle' : ''}${notch ? ' notch' : ''}`}
+      className={`room${panMode ? ' pan-mode' : ''}${idle ? ' idle' : ''}${notch ? ' notch' : ''}`}
     >
       <canvas ref={canvas} className="board" tabIndex={0} />
       <div ref={tip} className="tip" />
@@ -530,18 +526,15 @@ export default function Room({ id }) {
       <canvas ref={cursors} className="cursors" />
       <div className="float tl">{nav}</div>
       {play && <div className="play-tools tc">{play}</div>}
-      {!spectate && (
-        <div className="br">
-          <div className="float">{zoom}</div>
-          {full && <div className="float">{full}</div>}
-        </div>
-      )}
+      <div className="br">
+        <div className="float">{zoom}</div>
+        {full && <div className="float">{full}</div>}
+      </div>
       <div className="float tr">{account}</div>
-      {engine && spectate && <Spectate engine={engine} />}
-      {menu && engine && !spectate && <ContextMenu key={`${menu.kind}:${menu.id}:${menu.x}:${menu.y}`} engine={engine} at={menu} onClose={closeMenu} />}
-      {helpShown && !spectate && <Help onClose={closeHelp} closing={helpClosing} />}
+      {menu && engine && <ContextMenu key={`${menu.kind}:${menu.id}:${menu.x}:${menu.y}`} engine={engine} at={menu} onClose={closeMenu} />}
+      {helpShown && <Help onClose={closeHelp} closing={helpClosing} />}
       {party && <Celebration key={partyKey} onDone={endParty} />}
-      {import.meta.env.DEV && devMenu && engine && !spectate && (
+      {import.meta.env.DEV && devMenu && engine && (
         <DevMenu
           onConnect={() => engine.devConnect()}
           onRestart={() => {
@@ -562,12 +555,12 @@ export default function Room({ id }) {
           }}
         />
       )}
-      {engine && done && !spectate && (
+      {engine && done && (
         <button className="podium-btn" onClick={() => setPodium(true)} aria-label="Podium" title="Top players">
           <PodiumIcon />
         </button>
       )}
-      {engine && done && !spectate && (
+      {engine && done && (
         <button
           className="share-btn"
           onClick={async () => {
@@ -597,7 +590,7 @@ export default function Room({ id }) {
           onClose={closePodium}
         />
       )}
-      {engine && !spectate && <Players open={players} stats={stats} times={times} me={playerId} owner={data?.owner} nameOf={nameOf} online={online} seen={seen} />}
+      {engine && <Players open={players} stats={stats} times={times} me={playerId} owner={data?.owner} nameOf={nameOf} online={online} seen={seen} />}
     </div>
   )
 }
