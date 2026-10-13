@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../lib/api.js'
 import { useApp } from '../App.jsx'
 import { formatTime } from '../lib/time.js'
-import { Card } from '../pages/Rooms.jsx'
+import { Card, CardGhosts } from '../pages/Rooms.jsx'
 import Dialog from './Dialog.jsx'
 import { Dot } from './Players.jsx'
 import { Clock, Crown, Piece, User } from './icons.jsx'
@@ -86,11 +86,11 @@ export default function PlayerDialog({ p, here, owner, me, onAccount, onClose, c
         {failed ? (
           <p className="profile-empty">Couldn't load their other jigsaws.</p>
         ) : !info ? (
-          <span className="spin" />
+          <CardGhosts count={4} className="profile-rooms" />
         ) : !others.length ? (
           <p className="profile-empty">No other jigsaws you can see.</p>
         ) : (
-          <div className="grid">
+          <div className="profile-rooms">
             {others.map((r) => (
               <div key={r.id} className="profile-room">
                 <Card r={r} onOpen={open} />

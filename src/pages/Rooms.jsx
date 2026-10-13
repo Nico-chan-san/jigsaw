@@ -70,6 +70,21 @@ export function Card({ r, mine, onOpen, onDelete }) {
   )
 }
 
+// Grey stand-ins for cards while the jigsaws load, shimmering, with bars where the name and
+// numbers go. className sets out the cards, a grid by default.
+export function CardGhosts({ count = 6, className = 'grid' }) {
+  return (
+    <div className={className} aria-busy="true" aria-label="Loading jigsaws">
+      {Array.from({ length: count }, (_, k) => (
+        <div key={k} className="card ghost" aria-hidden="true">
+          <span className="ghost-bar name" />
+          <span className="ghost-bar stats" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 const TABS = [
   { key: 'all', title: 'All', hint: 'All jigsaws', test: () => true },
   { key: 'public', title: 'Public', hint: 'Public jigsaws', test: (r) => !r.private },
@@ -159,7 +174,14 @@ export default function RoomsDialog({ view, setView, closing, onClose }) {
         </div>
       }
     >
-      {listing ? (
+      {listing && !rooms ? (
+        <section className="rooms-section">
+          <h2 className="label">
+            <span className="ghost-bar label-bar" />
+          </h2>
+          <CardGhosts />
+        </section>
+      ) : listing ? (
         SECTIONS.map(({ title, test }) => {
           const list = rooms?.filter((r) => shown(r) && test(r)) || []
           if (!list.length) return null

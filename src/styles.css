@@ -403,6 +403,61 @@ button {
     transform 0.2s ease,
     box-shadow 0.2s ease;
 }
+/* A stand-in while the jigsaws load (see CardGhosts in Rooms.jsx): a light sweeps across it. */
+.card.ghost,
+.ghost-bar {
+  background: linear-gradient(100deg, var(--hover) 30%, color-mix(in srgb, var(--hover) 40%, var(--bg)) 50%, var(--hover) 70%) var(--hover);
+  background-size: 300% 100%;
+  animation: ghost 1.4s ease-in-out infinite;
+}
+.card.ghost {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px;
+  pointer-events: none;
+}
+.ghost-bar {
+  display: block;
+  height: 10px;
+  border-radius: 999px;
+  background-color: var(--line);
+  background-image: linear-gradient(100deg, var(--line) 30%, color-mix(in srgb, var(--line) 40%, var(--bg)) 50%, var(--line) 70%);
+}
+.ghost-bar.name {
+  width: 60%;
+  height: 12px;
+}
+.ghost-bar.stats {
+  width: 38%;
+}
+.ghost-bar.label-bar {
+  width: 90px;
+}
+/* Later cards shimmer a little after the earlier ones. */
+.card.ghost:nth-child(3n + 2),
+.card.ghost:nth-child(3n + 2) .ghost-bar {
+  animation-delay: 0.15s;
+}
+.card.ghost:nth-child(3n),
+.card.ghost:nth-child(3n) .ghost-bar {
+  animation-delay: 0.3s;
+}
+@keyframes ghost {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .card.ghost,
+  .ghost-bar {
+    animation: none;
+  }
+}
 .card:hover {
   transform: translateY(-2px);
   box-shadow:
@@ -1804,10 +1859,37 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   height: 15px;
   color: var(--muted);
 }
+/* Their jigsaws in one row that scrolls sideways. It reaches to the window's edges, and leaves room
+   above and below, so a lifted card's shadow isn't cut off. */
+.profile-rooms {
+  display: flex;
+  gap: 16px;
+  margin: -6px -16px -24px -22px;
+  padding: 6px 16px 24px 22px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scroll-padding: 0 16px 0 22px;
+  scrollbar-width: thin;
+}
+/* The placeholders while loading stay put: the ones that don't fit are cut off, not scrolled to. */
+.profile-rooms[aria-busy='true'] {
+  overflow-x: hidden;
+}
+.profile-rooms > * {
+  flex: none;
+  width: 220px;
+  scroll-snap-align: start;
+}
 .profile-room {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+@media (max-width: 480px) {
+  .profile-rooms > * {
+    width: 170px;
+  }
 }
 /* What they did in a jigsaw, under its card. */
 .profile-share {
