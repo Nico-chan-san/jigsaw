@@ -86,7 +86,7 @@ export default function PlayerDialog({ p, here, owner, me, onAccount, onClose, c
         {failed ? (
           <p className="profile-empty">Couldn't load their other jigsaws.</p>
         ) : !info ? (
-          <CardGhosts count={4} className="profile-rooms" />
+          <CardGhosts count={4} className="profile-rooms" caption />
         ) : !others.length ? (
           <p className="profile-empty">No other jigsaws you can see.</p>
         ) : (

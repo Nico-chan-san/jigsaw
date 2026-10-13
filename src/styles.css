@@ -432,16 +432,24 @@ button {
 .ghost-bar.stats {
   width: 38%;
 }
+.ghost-bar.caption {
+  width: 45%;
+  height: 8px;
+}
 .ghost-bar.label-bar {
   width: 90px;
 }
-/* Later cards shimmer a little after the earlier ones. */
+/* Later cards shimmer a little after the earlier ones, with their lines under them in a player's window. */
 .card.ghost:nth-child(3n + 2),
-.card.ghost:nth-child(3n + 2) .ghost-bar {
+.card.ghost:nth-child(3n + 2) .ghost-bar,
+.profile-room:nth-child(3n + 2) > .card.ghost,
+.profile-room:nth-child(3n + 2) .ghost-bar {
   animation-delay: 0.15s;
 }
 .card.ghost:nth-child(3n),
-.card.ghost:nth-child(3n) .ghost-bar {
+.card.ghost:nth-child(3n) .ghost-bar,
+.profile-room:nth-child(3n) > .card.ghost,
+.profile-room:nth-child(3n) .ghost-bar {
   animation-delay: 0.3s;
 }
 @keyframes ghost {
@@ -1896,6 +1904,8 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   display: flex;
   align-items: center;
   gap: 12px;
+  /* Fixed, so the placeholders' lines (see CardGhosts) are just as tall. */
+  height: 18px;
   padding: 0 4px;
   color: var(--muted);
   font-size: 12px;

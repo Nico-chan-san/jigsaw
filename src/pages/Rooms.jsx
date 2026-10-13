@@ -71,16 +71,29 @@ export function Card({ r, mine, onOpen, onDelete }) {
 }
 
 // Grey stand-ins for cards while the jigsaws load, shimmering, with bars where the name and
-// numbers go. className sets out the cards, a grid by default.
-export function CardGhosts({ count = 6, className = 'grid' }) {
+// numbers go. className sets out the cards, a grid by default. With caption, each has a line under
+// it as well, as in a player's window (see PlayerDialog.jsx), so nothing moves when the cards come.
+export function CardGhosts({ count = 6, className = 'grid', caption = false }) {
+  const ghost = (k) => (
+    <div key={k} className="card ghost" aria-hidden="true">
+      <span className="ghost-bar name" />
+      <span className="ghost-bar stats" />
+    </div>
+  )
   return (
     <div className={className} aria-busy="true" aria-label="Loading jigsaws">
-      {Array.from({ length: count }, (_, k) => (
-        <div key={k} className="card ghost" aria-hidden="true">
-          <span className="ghost-bar name" />
-          <span className="ghost-bar stats" />
-        </div>
-      ))}
+      {Array.from({ length: count }, (_, k) =>
+        caption ? (
+          <div key={k} className="profile-room" aria-hidden="true">
+            {ghost()}
+            <span className="profile-share">
+              <span className="ghost-bar caption" />
+            </span>
+          </div>
+        ) : (
+          ghost(k)
+        ),
+      )}
     </div>
   )
 }
