@@ -358,12 +358,16 @@ export default function Room({ id }) {
     return () => window.removeEventListener('keydown', key)
   }, [engine])
 
-  // The toolbar buttons, in four groups: in the corners and at the top middle, where the play tools
-  // are three bars side by side.
+  // The toolbar: all jigsaws and settings on the top left, the play tools at the top middle in three
+  // bars side by side, and the players on the top right.
   const nav = (
-    <button className="icon-btn" onClick={() => setDialog('rooms')} aria-label="All jigsaws" data-tip="All jigsaws">
-      <Rooms />
-    </button>
+    <>
+      <button className="icon-btn" onClick={() => setDialog('rooms')} aria-label="All jigsaws" data-tip="All jigsaws">
+        <Rooms />
+      </button>
+      {engine && <Timers roomId={id} me={playerId} initial={data.times} busRef={timeBus} stopped={done} onTimes={onTimes} />}
+      <Settings privateRoom={!!data?.private} onHelp={() => setHelp(true)} />
+    </>
   )
   const play = engine && (
     <>
@@ -407,12 +411,6 @@ export default function Room({ id }) {
       </div>
     </>
   )
-  const account = (
-    <>
-      {engine && <Timers roomId={id} me={playerId} initial={data.times} busRef={timeBus} stopped={done} onTimes={onTimes} />}
-      <Settings privateRoom={!!data?.private} onHelp={() => setHelp(true)} />
-    </>
-  )
   return (
     <div
       className={`room${panMode ? ' pan-mode' : ''}${idle ? ' idle' : ''}${notch ? ' notch' : ''}`}
@@ -447,10 +445,11 @@ export default function Room({ id }) {
       <canvas ref={cursors} className="cursors" />
       <div className="float tl">{nav}</div>
       {play && <div className="play-tools tc">{play}</div>}
-      <div className="tr">
-        {engine && <Players stats={stats} times={times} me={playerId} owner={data?.owner} nameOf={nameOf} online={online} />}
-        <div className="float">{account}</div>
-      </div>
+      {engine && (
+        <div className="tr">
+          <Players stats={stats} times={times} me={playerId} owner={data?.owner} nameOf={nameOf} online={online} />
+        </div>
+      )}
       {menu && engine && <ContextMenu key={`${menu.kind}:${menu.id}:${menu.x}:${menu.y}`} engine={engine} at={menu} onClose={closeMenu} />}
       {helpShown && <Help onClose={closeHelp} closing={helpClosing} />}
       {party && <Celebration key={partyKey} onDone={endParty} />}

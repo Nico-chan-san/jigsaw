@@ -131,7 +131,7 @@ button {
   top: 16px;
   left: 16px;
 }
-/* The top right: the player circles (see Players.jsx), then the account buttons. */
+/* The top right: the player circles (see Players.jsx). */
 .tr {
   position: absolute;
   top: 16px;
@@ -139,10 +139,6 @@ button {
   z-index: 5;
   display: flex;
   align-items: center;
-  gap: 10px;
-}
-.tr > .float {
-  position: static;
 }
 /* After a few seconds without the pointer or keyboard (see Room.jsx), the controls fade away. */
 .room .float,
@@ -1764,6 +1760,16 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   gap: 7px;
   font-weight: 500;
 }
+.profile-account {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.profile-account svg {
+  width: 15px;
+  height: 15px;
+}
 .profile-since {
   color: var(--muted);
   font-size: 13px;
@@ -2020,7 +2026,7 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 .settings-menu {
   position: absolute;
   top: calc(100% + 8px);
-  right: -4px;
+  left: -4px;
   display: flex;
   flex-direction: column;
   gap: 2px;

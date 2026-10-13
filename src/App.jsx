@@ -260,7 +260,7 @@ export default function App() {
         <Room key={roomId} id={roomId} />
       ) : (
         <div className="room">
-          <div className="float tr">
+          <div className="float tl">
             <Settings />
           </div>
         </div>

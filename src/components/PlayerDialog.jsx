@@ -5,14 +5,15 @@ import { formatTime } from '../lib/time.js'
 import { Card } from '../pages/Rooms.jsx'
 import Dialog from './Dialog.jsx'
 import { Dot } from './Players.jsx'
-import { Clock, Crown, Piece } from './icons.jsx'
+import { Clock, Crown, Piece, User } from './icons.jsx'
 
 const plural = (n, one) => `${n} ${n === 1 ? one : `${one}s`}`
 
 // A player's window, from their circle in the header: who they are, what they did in this jigsaw,
 // and the other jigsaws they've played. Private jigsaws only show if this player has them too (the
-// server checks). p is the player as the header knows them: { id, name, pieces, seconds }.
-export default function PlayerDialog({ p, here, owner, me, onClose, closing }) {
+// server checks). p is the player as the header knows them: { id, name, pieces, seconds }. Your own
+// window has a button to your account (onAccount).
+export default function PlayerDialog({ p, here, owner, me, onAccount, onClose, closing }) {
   const { player, roomId, openRoom } = useApp()
   const [info, setInfo] = useState(null)
   const [failed, setFailed] = useState(false)
@@ -49,6 +50,12 @@ export default function PlayerDialog({ p, here, owner, me, onClose, closing }) {
           </span>
           {since && <span className="profile-since">Playing since {since}</span>}
         </div>
+        {p.id === me && onAccount && (
+          <button className="secondary small profile-account" onClick={onAccount}>
+            <User />
+            Account
+          </button>
+        )}
       </div>
 
       <section>

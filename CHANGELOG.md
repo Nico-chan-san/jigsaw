@@ -2,6 +2,8 @@
 
 ## 13 October 2026
 
+- The settings button has moved to the top left, next to the all jigsaws button, so the top right is just the players.
+- Your own player window has an **Account** button.
 - A tray goes away once you drag the last pieces out of it. Undo brings it back with them.
 - Press **R** with a tray selected to rename it. Without a tray selected, **R** still celebrates.
 - Spectator mode is gone, along with its switch in the settings menu.

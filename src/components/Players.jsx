@@ -4,6 +4,7 @@ import { formatTime } from '../lib/time.js'
 import { useLinger } from '../lib/linger.js'
 import { Clock, Crown, More, Piece } from './icons.jsx'
 import PlayerDialog from './PlayerDialog.jsx'
+import AccountDialog from './AccountDialog.jsx'
 
 // At most this many circles in the header; everyone is in the menu behind the ... button.
 const SHOWN = 5
@@ -89,6 +90,14 @@ export default function Players({ stats, times, me, owner, nameOf, online }) {
   const [profile, setProfile] = useState(null)
   const [profileShown, profileClosing] = useLinger(profile)
   const closeProfile = useCallback(() => setProfile(null), [])
+  // Your own window has a button to your account.
+  const [account, setAccount] = useState(false)
+  const [accountShown, accountClosing] = useLinger(account)
+  const closeAccount = useCallback(() => setAccount(false), [])
+  const openAccount = useCallback(() => {
+    setProfile(null)
+    setAccount(true)
+  }, [])
   const wrap = useRef(null)
   const timer = useRef(0)
   const ranked = rankPlayers({ stats, times, nameOf })
@@ -209,8 +218,17 @@ export default function Players({ stats, times, me, owner, nameOf, online }) {
         </div>
       )}
       {current && (
-        <PlayerDialog p={current} here={online.has(current.id)} owner={owner} me={me} onClose={closeProfile} closing={profileClosing} />
+        <PlayerDialog
+          p={current}
+          here={online.has(current.id)}
+          owner={owner}
+          me={me}
+          onAccount={openAccount}
+          onClose={closeProfile}
+          closing={profileClosing}
+        />
       )}
+      {accountShown && <AccountDialog onClose={closeAccount} closing={accountClosing} />}
     </div>
   )
 }
