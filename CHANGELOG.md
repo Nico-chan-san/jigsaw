@@ -2,6 +2,8 @@
 
 ## 14 October 2026
 
+- Clicking a group to select it no longer nudges it if your hand moves a little while you click.
+- Pieces no longer end up slightly out of place when two players drop pieces onto the same group at the same moment, or when a group is picked up just as a piece snaps onto it. Nothing snaps onto pieces someone else is carrying.
 - The picture you copy to share a finished jigsaw ends at its white frame, with no empty space around it, and has **jigsaw.marnil.dev** along the bottom.
 
 ## 13 October 2026
