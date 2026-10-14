@@ -1356,7 +1356,11 @@ export class Engine {
     const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1
     const dy = Math.max(-200, Math.min(200, e.deltaY * unit))
     this.zoomAt(sx, sy, Math.exp(-dy * (e.ctrlKey ? 0.01 : 0.0018)))
-    if (this.drag) this.updatePivot()
+    if (this.drag) {
+      // Zooming while holding pieces carries them along: that's a drag, not a click.
+      this.drag.moved = true
+      this.updatePivot()
+    }
   }
 
   onKey(e) {
@@ -1540,9 +1544,15 @@ export class Engine {
       sy,
       px: wx,
       py: wy,
-      ox: ids.map((j) => this.x[j] - wx),
-      oy: ids.map((j) => this.y[j] - wy),
+      // From where each piece is going: a group picked up while some of its pieces are still easing
+      // into place (just snapped, here or by someone else) is carried as it will be, not bent.
+      ox: ids.map((j) => this.target(j)[0] - wx),
+      oy: ids.map((j) => this.target(j)[1] - wy),
       r0: ids.map((j) => this.r[j]),
+      // Where the pieces lay, and where any still easing were going, for a click that moves nothing.
+      x0: ids.map((j) => this.x[j]),
+      y0: ids.map((j) => this.y[j]),
+      to: ids.map((j) => this.moving.get(j)),
       k: 0,
       angle: 0,
       // Per piece: the centre of its module and the part of a spin still animating (radians).
@@ -2163,7 +2173,8 @@ export class Engine {
   sendLive(force) {
     const now = performance.now()
     clearTimeout(this.liveTimer)
-    if (!this.drag) return
+    // Nothing goes out until it's a drag rather than a click, so a click doesn't wiggle the pieces for others.
+    if (!this.drag?.moved) return
     if (force || now - this.lastLive >= LIVE_MS) {
       this.lastLive = now
       const d = this.drag
@@ -2176,6 +2187,22 @@ export class Engine {
   drop() {
     clearTimeout(this.liveTimer)
     const d = this.drag
+    // A click puts the pieces back exactly where they were and tells nobody they moved, so a hand
+    // that drifts a little while clicking a big group can't nudge it under someone else's drop.
+    if (!d.moved) {
+      d.ids.forEach((i, j) => {
+        this.x[i] = d.x0[j]
+        this.y[i] = d.y0[j]
+        if (d.to[j]) this.moving.set(i, d.to[j])
+      })
+      this.drag = null
+      this.lift.target = 0
+      this.canvas.style.cursor = ''
+      // Others saw them picked up: let go of them.
+      this.send({ type: 'moves', pieces: [] })
+      this.invalidate()
+      return
+    }
     const state = this.dragState()
     for (const p of state) {
       this.x[p.i] = p.x
@@ -2247,6 +2274,10 @@ export class Engine {
     const thr = S * 0.22
     const group = new Set(ids)
     const changed = new Set(ids)
+    // Groups someone else is carrying are moving under us: nothing snaps onto them.
+    const now = performance.now()
+    const held = new Set()
+    for (const [i, t] of this.held) if (t > now) held.add(this.g[i])
     const nbrs = (i) => {
       const c = i % cols
       const r = (i / cols) | 0
@@ -2255,15 +2286,19 @@ export class Engine {
       if (c < cols - 1) out.push(i + 1)
       if (r > 0) out.push(i - cols)
       if (r < rows - 1) out.push(i + cols)
-      return out
+      return out.filter((q) => !held.has(this.g[q]))
     }
+    // Measured between where the pieces are going, so a group still easing into place (moved by
+    // someone else a moment ago) is snapped onto where it ends up, not where it is passing through.
     const gap = (p, q) => {
       if (this.r[p] !== this.r[q]) return null
       const dc = (q % cols) - (p % cols)
       const dr = ((q / cols) | 0) - ((p / cols) | 0)
       const [ex, ey] = rot(dc * w, dr * h, this.r[p])
-      const dx = this.x[q] - (this.x[p] + ex)
-      const dy = this.y[q] - (this.y[p] + ey)
+      const [px, py] = this.target(p)
+      const [qx, qy] = this.target(q)
+      const dx = qx - (px + ex)
+      const dy = qy - (py + ey)
       return { dx, dy, d: Math.hypot(dx, dy) }
     }
     // A single piece (one cell, or a long piece) that gets connected is credited to this player
@@ -2276,10 +2311,13 @@ export class Engine {
         changed.add(i)
       }
     }
+    // A piece still easing somewhere eases to the shifted spot instead.
     const shift = (list, dx, dy) => {
       for (const i of list) {
         this.x[i] += dx
         this.y[i] += dy
+        const to = this.moving.get(i)
+        if (to) this.moving.set(i, [to[0] + dx, to[1] + dy])
         changed.add(i)
       }
     }
@@ -2297,12 +2335,12 @@ export class Engine {
     if (out) out.onto = best.q
     shift(ids, best.dx, best.dy)
     credit(ids)
+    // The group snapped onto only counts as changed where it actually changes (credit, group id, or
+    // moved below), so a snap onto a big group doesn't send all of it, as this player last saw it, to
+    // everyone: that would undo whatever someone else did to it a moment ago.
     const target = this.members(this.g[best.q])
     credit(target)
-    for (const i of target) {
-      group.add(i)
-      changed.add(i)
-    }
+    for (const i of target) group.add(i)
     // How far each group that joins was moved: the one snapped onto first, so it wins a tie.
     const parts = [
       { n: target.length, dx: 0, dy: 0 },
@@ -2454,6 +2492,8 @@ export class Engine {
           if (dr) this.turns.set(msg.ids[j], { self: true, a: (this.turns.get(msg.ids[j])?.a || 0) - (dr === 3 ? -1 : dr) * Q })
         }
       }
+      // Where the pieces lay when first picked up, to put them back if it was only a click.
+      d.from = (d.k !== undefined && prev.from) || d.ids.map((i) => this.target(i))
       this.remote.set(msg.client, d)
       this.rlift.set(msg.client, { ids: d.ids, set: new Set(d.ids), value: this.rlift.get(msg.client)?.value || 0, target: 1, tray: !!msg.tray })
       this.toTop(new Set(d.ids))
@@ -2462,10 +2502,23 @@ export class Engine {
       const d = this.remote.get(msg.client)
       if (d) this.remoteLive(d, msg.px, msg.py, msg.k | 0, now)
     } else if (msg.type === 'moves') {
-      this.remote.delete(msg.client)
-      const rl = this.rlift.get(msg.client)
-      if (rl) rl.target = 0
-      this.applyRemote(msg.pieces, msg.turns)
+      // A fix to pieces someone left behind (see applyRemote) isn't a drop: whatever they hold stays held.
+      const from = new Map()
+      if (!msg.fix) {
+        // Pieces they held that aren't in the message (they only clicked) go back where they were.
+        const d = this.remote.get(msg.client)
+        const sent = new Set((msg.pieces || []).map((p) => p.i))
+        if (d)
+          d.ids.forEach((i, j) => {
+            this.held.delete(i)
+            if (d.from?.[j]) from.set(i, d.from[j])
+            if (!sent.has(i) && !this.drag?.set.has(i) && d.from?.[j]) this.moving.set(i, d.from[j])
+          })
+        this.remote.delete(msg.client)
+        const rl = this.rlift.get(msg.client)
+        if (rl) rl.target = 0
+      }
+      this.applyRemote(msg.pieces || [], msg.turns, from)
     } else if (msg.type === 'marks') {
       this.learnPlayer(msg)
       const ok = (a) => (Array.isArray(a) ? a.filter((i) => Number.isInteger(i) && i >= 0 && i < this.n) : [])
@@ -2529,9 +2582,24 @@ export class Engine {
     this.invalidate()
   }
 
-  applyRemote(list, turns) {
+  // from: where pieces the sender was carrying lay when they picked them up.
+  applyRemote(list, turns, from) {
     const g0 = this.g.slice()
     const touched = new Set()
+    // How far each group that the message moves, without turning, went: { dx, dy, n }, or null if its
+    // pieces didn't all move the same way.
+    const shifts = new Map()
+    for (const p of list) {
+      if (this.drag?.set.has(p.i) || g0[p.i] !== p.g) continue
+      const [x, y] = from?.get(p.i) || this.target(p.i)
+      const dx = p.x - x
+      const dy = p.y - y
+      const s = shifts.get(p.g)
+      if (this.r[p.i] !== p.r) shifts.set(p.g, null)
+      else if (s === undefined) shifts.set(p.g, { dx, dy, n: 1 })
+      else if (s && Math.abs(s.dx - dx) + Math.abs(s.dy - dy) < 1e-6) s.n++
+      else shifts.set(p.g, null)
+    }
     for (const p of list) {
       if (this.drag?.set.has(p.i)) continue
       this.held.delete(p.i)
@@ -2560,6 +2628,37 @@ export class Engine {
         }
         this.turns.set(i, turn)
       }
+    }
+    // Someone moved a group without some pieces we know are in it: they joined it from another player
+    // at the same moment, so the sender didn't know yet. Those pieces go along, and everyone who sees
+    // that says so, so it's saved. Only when the message moved most of the group, so its own fixes
+    // (a few pieces) never drag the rest along.
+    const now = performance.now()
+    const left = []
+    for (const [gid, s] of shifts) {
+      if (!s || Math.hypot(s.dx, s.dy) < 1e-6) continue
+      const rest = this.members(gid).filter((i) => !touched.has(i))
+      if (!rest.length || rest.length >= s.n) continue
+      if (rest.some((i) => this.drag?.set.has(i) || this.held.get(i) > now)) continue
+      for (const i of rest) {
+        this.x[i] += s.dx
+        this.y[i] += s.dy
+        const to = this.moving.get(i)
+        if (to) this.moving.set(i, [to[0] + s.dx, to[1] + s.dy])
+        touched.add(i)
+        left.push(i)
+      }
+    }
+    if (left.length) {
+      for (const i of left) [this.sh.x[i], this.sh.y[i]] = this.target(i)
+      this.send({
+        type: 'moves',
+        fix: true,
+        pieces: left.map((i) => {
+          const [x, y] = this.target(i)
+          return { i, x, y, r: this.r[i], g: this.g[i], by: this.by[i] }
+        }),
+      })
     }
     if (touched.size) this.toTop(touched)
     this.growSelection()
@@ -3233,6 +3332,7 @@ export class Engine {
   // After the table moves under the pointer, what it holds keeps up with it.
   follow() {
     if (this.drag) {
+      this.drag.moved = true
       this.updatePivot()
       this.sendLive()
     } else if (this.carry?.moved) {
