@@ -39,6 +39,13 @@ export const TRAY_COLORS = {
 const TABLE = 10
 // How far a press may move and still count as a click.
 const CLICK_PX = 5
+// Groups are checked for pieces out of line (see repair()) this long (ms) after they change, and
+// again as long as some of their pieces are still moving.
+const CHECK_MS = 400
+// How far a piece in a group may be from where the grid puts it and still count as in line, as a part
+// of the piece size: well below what shows, well above the rounding (about 0.01) that older pages
+// left in saved positions.
+const LINE_TOL = 0.005
 // How far (screen px) an alt drag on an image goes from faintest to solid.
 const REF_FADE_PX = 300
 // How long (ms) tray and image buttons take to fade in or out.
@@ -324,6 +331,9 @@ export class Engine {
     this.panMode = false
     this.held = new Map()
     this.moving = new Map()
+    // Groups waiting to be checked for pieces out of line, see checkGroups().
+    this.toCheck = new Set()
+    this.checkTimer = 0
     // Bursts where pieces just joined: { x, y, t0, a } in world units.
     this.pops = []
     this.colors = { bg: '#f4f4f4', card: '#fafafa', edge: 'rgba(0,0,0,.1)', dot: 'rgba(0,0,0,.12)', shadow: 'rgba(0,0,0,.35)', sel: '#2f6fed' }
@@ -459,6 +469,7 @@ export class Engine {
     window.removeEventListener('scroll', this.h.moved, { capture: true })
     window.removeEventListener('resize', this.h.moved)
     this.ro.disconnect()
+    clearTimeout(this.checkTimer)
     cancelAnimationFrame(this.raf)
     this.raf = -1
     this.spriteHost?.terminate()
@@ -1808,6 +1819,7 @@ export class Engine {
         return { i, x, y, r: this.r[i], g: this.g[i], by: this.by[i] }
       }),
     })
+    this.checkGroups(new Set([...changed].map((i) => this.g[i])))
     this.emitStats()
     this.invalidate()
     this.checkComplete(true)
@@ -2503,7 +2515,6 @@ export class Engine {
       if (d) this.remoteLive(d, msg.px, msg.py, msg.k | 0, now)
     } else if (msg.type === 'moves') {
       // A fix to pieces someone left behind (see applyRemote) isn't a drop: whatever they hold stays held.
-      const from = new Map()
       if (!msg.fix) {
         // Pieces they held that aren't in the message (they only clicked) go back where they were.
         const d = this.remote.get(msg.client)
@@ -2511,14 +2522,13 @@ export class Engine {
         if (d)
           d.ids.forEach((i, j) => {
             this.held.delete(i)
-            if (d.from?.[j]) from.set(i, d.from[j])
             if (!sent.has(i) && !this.drag?.set.has(i) && d.from?.[j]) this.moving.set(i, d.from[j])
           })
         this.remote.delete(msg.client)
         const rl = this.rlift.get(msg.client)
         if (rl) rl.target = 0
       }
-      this.applyRemote(msg.pieces || [], msg.turns, from)
+      this.applyRemote(msg.pieces || [], msg.turns)
     } else if (msg.type === 'marks') {
       this.learnPlayer(msg)
       const ok = (a) => (Array.isArray(a) ? a.filter((i) => Number.isInteger(i) && i >= 0 && i < this.n) : [])
@@ -2582,24 +2592,9 @@ export class Engine {
     this.invalidate()
   }
 
-  // from: where pieces the sender was carrying lay when they picked them up.
-  applyRemote(list, turns, from) {
+  applyRemote(list, turns) {
     const g0 = this.g.slice()
     const touched = new Set()
-    // How far each group that the message moves, without turning, went: { dx, dy, n }, or null if its
-    // pieces didn't all move the same way.
-    const shifts = new Map()
-    for (const p of list) {
-      if (this.drag?.set.has(p.i) || g0[p.i] !== p.g) continue
-      const [x, y] = from?.get(p.i) || this.target(p.i)
-      const dx = p.x - x
-      const dy = p.y - y
-      const s = shifts.get(p.g)
-      if (this.r[p.i] !== p.r) shifts.set(p.g, null)
-      else if (s === undefined) shifts.set(p.g, { dx, dy, n: 1 })
-      else if (s && Math.abs(s.dx - dx) + Math.abs(s.dy - dy) < 1e-6) s.n++
-      else shifts.set(p.g, null)
-    }
     for (const p of list) {
       if (this.drag?.set.has(p.i)) continue
       this.held.delete(p.i)
@@ -2629,38 +2624,8 @@ export class Engine {
         this.turns.set(i, turn)
       }
     }
-    // Someone moved a group without some pieces we know are in it: they joined it from another player
-    // at the same moment, so the sender didn't know yet. Those pieces go along, and everyone who sees
-    // that says so, so it's saved. Only when the message moved most of the group, so its own fixes
-    // (a few pieces) never drag the rest along.
-    const now = performance.now()
-    const left = []
-    for (const [gid, s] of shifts) {
-      if (!s || Math.hypot(s.dx, s.dy) < 1e-6) continue
-      const rest = this.members(gid).filter((i) => !touched.has(i))
-      if (!rest.length || rest.length >= s.n) continue
-      if (rest.some((i) => this.drag?.set.has(i) || this.held.get(i) > now)) continue
-      for (const i of rest) {
-        this.x[i] += s.dx
-        this.y[i] += s.dy
-        const to = this.moving.get(i)
-        if (to) this.moving.set(i, [to[0] + s.dx, to[1] + s.dy])
-        touched.add(i)
-        left.push(i)
-      }
-    }
-    if (left.length) {
-      for (const i of left) [this.sh.x[i], this.sh.y[i]] = this.target(i)
-      this.send({
-        type: 'moves',
-        fix: true,
-        pieces: left.map((i) => {
-          const [x, y] = this.target(i)
-          return { i, x, y, r: this.r[i], g: this.g[i], by: this.by[i] }
-        }),
-      })
-    }
     if (touched.size) this.toTop(touched)
+    this.checkGroups(new Set([...touched].map((i) => this.g[i])))
     this.growSelection()
     this.joined(g0, touched, false)
     this.emitStats()
@@ -2675,6 +2640,85 @@ export class Engine {
         p.x !== this.x[p.i] || p.y !== this.y[p.i] || p.r !== this.r[p.i] || p.g !== this.g[p.i],
     )
     if (list.length) this.applyRemote(list)
+  }
+
+  // ---- repair -------------------------------------------------------------
+
+  // Checks these groups (all of them, without gids) for pieces out of line, a moment from now.
+  checkGroups(gids) {
+    if (gids) for (const g of gids) this.toCheck.add(g)
+    else for (let i = 0; i < this.n; i++) this.toCheck.add(this.g[i])
+    if (this.checkTimer || !this.toCheck.size) return
+    this.checkTimer = setTimeout(() => {
+      this.checkTimer = 0
+      this.repair()
+    }, CHECK_MS)
+  }
+
+  // A piece can end up in a group but not where the grid puts it next to the others: two players
+  // acting at the same moment, or an open page still running code from before a fix. Left alone,
+  // every piece later snapped onto it lines up with it too. So in each group, the most pieces that
+  // agree with each other stay, and the rest move into line with them; a tie goes to the side with
+  // the lowest piece, so every page picks the same. Everyone is told, so it's saved. Groups with
+  // pieces still easing, carried or turning are checked again once they settle.
+  repair() {
+    const { cols } = this.room
+    const { w, h, S } = this.geo
+    const tol = S * LINE_TOL
+    const now = performance.now()
+    const busy = (i) => this.moving.has(i) || this.turns.has(i) || this.drag?.set.has(i) || this.held.get(i) > now
+    const groups = new Map()
+    for (let i = 0; i < this.n; i++) {
+      if (!this.toCheck.has(this.g[i])) continue
+      if (!groups.has(this.g[i])) groups.set(this.g[i], [])
+      groups.get(this.g[i]).push(i)
+    }
+    this.toCheck.clear()
+    const later = []
+    const fixed = []
+    const grid = (i, a) => rot(((i % cols) - (a % cols)) * w, (((i / cols) | 0) - ((a / cols) | 0)) * h, this.r[a])
+    for (const [gid, list] of groups) {
+      if (list.length < 2) continue
+      if (list.some(busy)) {
+        later.push(gid)
+        continue
+      }
+      // Pieces by how far they are from where the grid puts them next to the first. Pieces are in
+      // index order, so each side's first piece is its lowest.
+      const a = list[0]
+      const sides = []
+      for (const i of list) {
+        if (this.r[i] !== this.r[a]) continue
+        const [ex, ey] = grid(i, a)
+        const dx = this.x[i] - this.x[a] - ex
+        const dy = this.y[i] - this.y[a] - ey
+        let side = sides.find((s) => Math.hypot(s.dx - dx, s.dy - dy) < tol)
+        if (!side) sides.push((side = { dx, dy, ids: [] }))
+        side.ids.push(i)
+      }
+      if (sides.length < 2) continue
+      sides.sort((p, q) => q.ids.length - p.ids.length || p.ids[0] - q.ids[0])
+      const b = sides[0].ids[0]
+      for (const side of sides.slice(1)) {
+        for (const i of side.ids) {
+          const [ex, ey] = grid(i, b)
+          this.moving.set(i, [this.x[b] + ex, this.y[b] + ey])
+          fixed.push(i)
+        }
+      }
+    }
+    if (later.length) this.checkGroups(later)
+    if (!fixed.length) return
+    const what = fixed.length === 1 ? 'a piece back into line with its group' : `${fixed.length} pieces back into line with their groups`
+    console.warn(`Moved ${what}:`, fixed)
+    const pieces = fixed.map((i) => {
+      const [x, y] = this.moving.get(i)
+      this.sh.x[i] = x
+      this.sh.y[i] = y
+      return { i, x, y, r: this.r[i], g: this.g[i], by: this.by[i] }
+    })
+    this.send({ type: 'moves', fix: true, pieces })
+    this.invalidate()
   }
 
   // ---- reference images ---------------------------------------------------

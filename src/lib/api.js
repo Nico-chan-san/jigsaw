@@ -1,3 +1,5 @@
+import { newBuild } from './update.js'
+
 export const clientId = Math.random().toString(36).slice(2)
 
 // Open room sockets, by room id.
@@ -88,7 +90,8 @@ export const api = {
       }
       ws.onmessage = (e) => {
         const msg = JSON.parse(e.data)
-        if (msg.client !== clientId) onMessage(msg)
+        if (msg.type === 'build') newBuild(msg.build)
+        else if (msg.client !== clientId) onMessage(msg)
       }
       ws.onclose = () => {
         if (dead) return

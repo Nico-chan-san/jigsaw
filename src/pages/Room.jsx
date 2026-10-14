@@ -248,6 +248,7 @@ export default function Room({ id }) {
             const fresh = await api.room(id).catch(() => null)
             if (!fresh || dead) return
             eng.resync(fresh.pieces)
+            eng.checkGroups()
             eng.setRefs(fresh.refs || [])
             eng.setTrays(fresh.trays || [])
             learn(fresh.players)
@@ -256,6 +257,8 @@ export default function Room({ id }) {
             noteBus.current?.({ type: 'notes-reset', notes: fresh.notes || [] })
           },
         })
+        // Pieces left out of line in their group (see Engine.repair) are put right, now that it can say so.
+        eng.checkGroups()
         for (const ref of takeLocalRefs(id)) {
           eng.remoteRef(ref)
           api.saveRef(id, ref)
