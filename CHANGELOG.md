@@ -2,6 +2,8 @@
 
 ## 14 October 2026
 
+- A piece that ended up connected but slightly out of line with the rest of its group slides back into place by itself, for everyone. Jigsaws that already have one are fixed the next time someone opens them.
+- After an update to the game, an open jigsaw reloads itself onto the new version, waiting until you're not holding anything, typing or in a window.
 - Clicking a group to select it no longer nudges it if your hand moves a little while you click.
 - Pieces no longer end up slightly out of place when two players drop pieces onto the same group at the same moment, or when a group is picked up just as a piece snaps onto it. Nothing snaps onto pieces someone else is carrying.
 - The picture you copy to share a finished jigsaw ends at its white frame, with no empty space around it, and has **jigsaw.marnil.dev** along the bottom.

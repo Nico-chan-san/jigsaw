@@ -466,6 +466,8 @@ function createApi(dbFile) {
     ws.player = player || null
     if (player) broadcast(roomId, { type: 'player', client, player: { id: player.id, name: player.name } }, ws)
     presence(roomId)
+    // Which build is being served, so a page still running an older one can reload (see src/lib/update.js).
+    if (build) ws.send(JSON.stringify({ type: 'build', build }))
     ws.handler = (text) => {
       try {
         handle(JSON.parse(text))
@@ -759,7 +761,11 @@ function createApi(dbFile) {
     }
   }
 
-  return { middleware, connect }
+  // The script the built page loads (it's named after its contents), or null while developing.
+  let build = null
+  const setBuild = (b) => (build = b)
+
+  return { middleware, connect, setBuild }
 }
 
 export default function sqliteApi(options = {}) {
@@ -773,6 +779,12 @@ export default function sqliteApi(options = {}) {
   return {
     name: 'sqlite-api',
     configureServer: mount,
-    configurePreviewServer: mount,
+    configurePreviewServer: (server) => {
+      mount(server)
+      try {
+        const html = readFileSync(resolve(server.config.root, server.config.build.outDir, 'index.html'), 'utf8')
+        api.setBuild(/<script type="module"[^>]*\ssrc="([^"]+)"/.exec(html)?.[1] || null)
+      } catch {}
+    },
   }
 }
