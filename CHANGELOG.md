@@ -1,5 +1,9 @@
 # Changelog
 
+## 14 October 2026
+
+- The picture you copy to share a finished jigsaw ends at its white frame, with no empty space around it, and has **jigsaw.marnil.dev** along the bottom.
+
 ## 13 October 2026
 
 - While jigsaws are loading, the all jigsaws window and player windows show shimmering placeholder cards instead of an empty space or a spinner.

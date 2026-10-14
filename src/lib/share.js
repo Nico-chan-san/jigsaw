@@ -1,11 +1,13 @@
 import { formatTime } from './time.js'
 
 // The picture to share: the finished jigsaw, blurred and dimmed, with the podium (as it looks in the
-// game) over it, as a sticker with a white edge on a see-through background. No other text.
+// game) over it, in a white frame with the site's address along the bottom. Nothing in it is
+// see-through, since many apps paste a copied picture's see-through parts as white or black.
 const WIDTH = 1200
 const BORDER = 22
-// Room around the stickers for their shadow.
-const MARGIN = 48
+// The bottom of the frame is deeper, to hold the address.
+const FOOTER = 60
+const ADDRESS = 'jigsaw.marnil.dev'
 // The podium is drawn at most this many times the size it has on the page.
 const K_MAX = 1.6
 // The picture behind the podium is blurred and dimmed like the page is behind it in the game.
@@ -80,17 +82,23 @@ export function renderShare({ image, ranked }) {
   const ph = Math.round((WIDTH * ih) / iw)
   const top = ranked.slice(0, 3)
   const canvas = document.createElement('canvas')
-  canvas.width = WIDTH + 2 * (MARGIN + BORDER)
-  canvas.height = ph + 2 * (MARGIN + BORDER)
+  canvas.width = WIDTH + 2 * BORDER
+  canvas.height = ph + BORDER + FOOTER
   const ctx = canvas.getContext('2d')
-  const px = MARGIN + BORDER
-  const py = MARGIN + BORDER
+  const px = BORDER
+  const py = BORDER
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
 
-  // The white edge, then the jigsaw inside it, blurred and dimmed like the page behind the podium.
-  round(ctx, px, py, WIDTH, ph, 14)
-  sticker(ctx, BORDER, '#fff')
+  // The white frame with the address, then the jigsaw inside it, blurred and dimmed like the page
+  // behind the podium.
+  ctx.fillStyle = '#fff'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.fillStyle = INK
+  ctx.font = `600 24px ${FONT}`
+  ctx.textAlign = 'right'
+  ctx.fillText(ADDRESS, px + WIDTH, py + ph + FOOTER / 2)
+  ctx.textAlign = 'center'
   ctx.save()
   round(ctx, px, py, WIDTH, ph, 14)
   ctx.clip()
