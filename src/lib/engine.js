@@ -1111,6 +1111,9 @@ export class Engine {
     const keep = e.shiftKey
     this.marquee = {
       pointer: e.pointerId,
+      // The corner it started from stays on that spot of the table when the camera moves.
+      wx0: wx,
+      wy0: wy,
       sx0: sx,
       sy0: sy,
       sx,
@@ -1236,6 +1239,7 @@ export class Engine {
       const m = this.pan.menu
       if (m && Math.hypot(sx - m.sx, sy - m.sy) > CLICK_PX) this.pan.menu = null
       this.clampCam()
+      if (this.marquee) this.updateMarquee()
       this.invalidate()
       return
     }
@@ -1288,8 +1292,9 @@ export class Engine {
     if (this.drag && e.pointerId === this.drag.pointer) {
       const d = this.drag
       this.drop()
-      // Clicking a piece without dragging selects it (its whole module), and only it.
-      if (!d.moved && d.piece !== undefined) this.setSelection(new Set(this.members(this.g[d.piece])))
+      // Clicking a piece without dragging selects it (its whole module), and only it. Dragging or
+      // turning a piece that wasn't selected (nothing is, then) leaves it selected where it lands.
+      if (d.piece !== undefined && (!d.moved || !this.sel.size)) this.setSelection(new Set(this.members(this.g[d.piece])))
     }
     if (this.carry && e.pointerId === this.carry.pointer) this.endCarry()
     if (this.trayShift && e.pointerId === this.trayShift.pointer) {
@@ -1335,9 +1340,11 @@ export class Engine {
     }
   }
 
-  // Selects every group with a piece centre inside the box.
+  // Selects every group with a piece centre inside the box. Also called when the camera moves.
   updateMarquee() {
     const m = this.marquee
+    m.sx0 = (m.wx0 - this.cam.x) * this.cam.z + this.vw / 2
+    m.sy0 = (m.wy0 - this.cam.y) * this.cam.z + this.vh / 2
     const [ax, ay] = this.toWorld(Math.min(m.sx0, m.sx), Math.min(m.sy0, m.sy))
     const [bx, by] = this.toWorld(Math.max(m.sx0, m.sx), Math.max(m.sy0, m.sy))
     const hit = []
@@ -1367,6 +1374,7 @@ export class Engine {
     const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1
     const dy = Math.max(-200, Math.min(200, e.deltaY * unit))
     this.zoomAt(sx, sy, Math.exp(-dy * (e.ctrlKey ? 0.01 : 0.0018)))
+    if (this.marquee) this.updateMarquee()
     if (this.drag) {
       // Zooming while holding pieces carries them along: that's a drag, not a click.
       this.drag.moved = true
@@ -1560,10 +1568,6 @@ export class Engine {
       ox: ids.map((j) => this.target(j)[0] - wx),
       oy: ids.map((j) => this.target(j)[1] - wy),
       r0: ids.map((j) => this.r[j]),
-      // Where the pieces lay, and where any still easing were going, for a click that moves nothing.
-      x0: ids.map((j) => this.x[j]),
-      y0: ids.map((j) => this.y[j]),
-      to: ids.map((j) => this.moving.get(j)),
       k: 0,
       angle: 0,
       // Per piece: the centre of its module and the part of a spin still animating (radians).
@@ -2185,8 +2189,7 @@ export class Engine {
   sendLive(force) {
     const now = performance.now()
     clearTimeout(this.liveTimer)
-    // Nothing goes out until it's a drag rather than a click, so a click doesn't wiggle the pieces for others.
-    if (!this.drag?.moved) return
+    if (!this.drag) return
     if (force || now - this.lastLive >= LIVE_MS) {
       this.lastLive = now
       const d = this.drag
@@ -2199,22 +2202,6 @@ export class Engine {
   drop() {
     clearTimeout(this.liveTimer)
     const d = this.drag
-    // A click puts the pieces back exactly where they were and tells nobody they moved, so a hand
-    // that drifts a little while clicking a big group can't nudge it under someone else's drop.
-    if (!d.moved) {
-      d.ids.forEach((i, j) => {
-        this.x[i] = d.x0[j]
-        this.y[i] = d.y0[j]
-        if (d.to[j]) this.moving.set(i, d.to[j])
-      })
-      this.drag = null
-      this.lift.target = 0
-      this.canvas.style.cursor = ''
-      // Others saw them picked up: let go of them.
-      this.send({ type: 'moves', pieces: [] })
-      this.invalidate()
-      return
-    }
     const state = this.dragState()
     for (const p of state) {
       this.x[p.i] = p.x
@@ -2504,8 +2491,6 @@ export class Engine {
           if (dr) this.turns.set(msg.ids[j], { self: true, a: (this.turns.get(msg.ids[j])?.a || 0) - (dr === 3 ? -1 : dr) * Q })
         }
       }
-      // Where the pieces lay when first picked up, to put them back if it was only a click.
-      d.from = (d.k !== undefined && prev.from) || d.ids.map((i) => this.target(i))
       this.remote.set(msg.client, d)
       this.rlift.set(msg.client, { ids: d.ids, set: new Set(d.ids), value: this.rlift.get(msg.client)?.value || 0, target: 1, tray: !!msg.tray })
       this.toTop(new Set(d.ids))
@@ -2516,14 +2501,9 @@ export class Engine {
     } else if (msg.type === 'moves') {
       // A fix to pieces someone left behind (see applyRemote) isn't a drop: whatever they hold stays held.
       if (!msg.fix) {
-        // Pieces they held that aren't in the message (they only clicked) go back where they were.
+        // They let go of everything they held.
         const d = this.remote.get(msg.client)
-        const sent = new Set((msg.pieces || []).map((p) => p.i))
-        if (d)
-          d.ids.forEach((i, j) => {
-            this.held.delete(i)
-            if (!sent.has(i) && !this.drag?.set.has(i) && d.from?.[j]) this.moving.set(i, d.from[j])
-          })
+        if (d) for (const i of d.ids) this.held.delete(i)
         this.remote.delete(msg.client)
         const rl = this.rlift.get(msg.client)
         if (rl) rl.target = 0
@@ -3386,6 +3366,7 @@ export class Engine {
     const d = this.refDrag
     const p = d?.moved && this.pointers.get(d.pointer)
     if (p) this.moveRef(...this.toWorld(...p))
+    if (this.marquee) this.updateMarquee()
   }
 
   // ---- rendering ----------------------------------------------------------
@@ -3417,6 +3398,7 @@ export class Engine {
         this.camAnim = null
         this.clampCam()
       } else again = true
+      if (this.marquee) this.updateMarquee()
     }
 
     let [vx, vy] = this.edgeDir()
