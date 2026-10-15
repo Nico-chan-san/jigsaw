@@ -2,6 +2,10 @@
 
 ## 15 October 2026
 
+- Settings open in a window in the middle of the screen instead of a dropdown, grouped into sections. Press **Esc** to open or close them, as long as Esc has nothing else to do, like clearing a selection or closing a menu.
+- **Log out** has moved out of the settings to the **Account** window.
+- Press **P** to open or close the list of all players.
+- Esc no longer leaves fullscreen when nothing is selected, since it opens the settings now. Hold it down to leave fullscreen, or press **F**.
 - Moving a piece or group by just a few pixels works again, for fine adjustments. Letting go after a tiny movement no longer puts it back where it was.
 - Moving or zooming the view while dragging out a selection box keeps the box's starting corner on the same spot of the table, so the box grows to cover what you scroll over instead of sliding along with the view.
 - A piece or group you drag, or turn while holding it, stays selected after you let go, so you can keep turning or sorting it straight away. This also fixes a quick click and **Space** leaving the piece unselected.

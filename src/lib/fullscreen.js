@@ -12,7 +12,7 @@ export function toggleFullscreen() {
   const go = el.requestFullscreen || el.webkitRequestFullscreen
   const done = go?.call(el, { navigationUI: 'hide' })
   // Normally Escape always leaves fullscreen. Where the browser lets us keep it (Chrome, Edge),
-  // Escape clears the selection first (see Room), and holding it down leaves fullscreen.
+  // Escape does what it does outside fullscreen, and holding it down leaves fullscreen.
   done?.then?.(() => navigator.keyboard?.lock?.(['Escape']).catch(() => {}), () => {})
 }
 

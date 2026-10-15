@@ -25,7 +25,7 @@ import ContextMenu from '../components/ContextMenu.jsx'
 import { TrayButton } from '../components/Trays.jsx'
 import { renderShare, shareImage } from '../lib/share.js'
 import { playSnap } from '../lib/sound.js'
-import { canFullscreen, fullscreenEl, toggleFullscreen, useNotch } from '../lib/fullscreen.js'
+import { canFullscreen, toggleFullscreen, useNotch } from '../lib/fullscreen.js'
 
 // A shortcut key shown in the corner of the button it belongs to.
 const KeyHint = ({ k }) => (
@@ -51,7 +51,7 @@ function useIdle() {
     let timer = 0
     let over = false
     let touch = false
-    const busy = () => over || touch || document.querySelector('.modal-bg, .settings-menu, .players-menu, .float :focus-visible, .players :focus-visible')
+    const busy = () => over || touch || document.querySelector('.modal-bg, .players-menu, .float :focus-visible, .players :focus-visible')
     const sleep = () => (busy() ? (timer = setTimeout(sleep, IDLE_MS)) : setIdle(true))
     const wake = (e) => {
       if (e.type !== 'keydown') over = !!e.target?.closest?.('.float, .players, .podium-btn, .share-btn')
@@ -120,6 +120,12 @@ export default function Room({ id }) {
   const noteBus = useRef(null)
   const reactBus = useRef(null)
   const createNote = useRef(null)
+  const openPlayers = useRef(null)
+  // Escape clears these, so it doesn't open the settings then.
+  const escTaken = useCallback(
+    () => !!engine && !!(engine.drag || engine.trim || engine.selCount || engine.refSel || engine.traySel || engine.selRefs.size || engine.selNotes.size),
+    [engine],
+  )
   const [stats, setStats] = useState(() => new Map())
   const [times, setTimes] = useState({})
   // Player ids in the room right now, and when the others were last here (ms by id).
@@ -310,22 +316,6 @@ export default function Room({ id }) {
     if (error) navigate('/rooms')
   }, [error])
 
-  // Escape in fullscreen (when the browser passes it on, see toggleFullscreen): anything open or
-  // selected goes first, as usual. With nothing left for it to do, it leaves fullscreen. This runs
-  // in the capture phase, so it sees the state from before the other handlers clear it.
-  useEffect(() => {
-    if (!engine) return
-    const key = (e) => {
-      if (e.key !== 'Escape' || e.repeat || !fullscreenEl()) return
-      if (e.target?.closest?.('input, textarea, [contenteditable]')) return
-      if (document.querySelector('.modal-bg, .settings-menu, .react-pick [aria-pressed="true"]')) return
-      if (engine.drag || engine.selCount || engine.refSel) return
-      toggleFullscreen()
-    }
-    window.addEventListener('keydown', key, true)
-    return () => window.removeEventListener('keydown', key, true)
-  }, [engine])
-
   // Other players only see our cursor while we're playing, not while a dialog is open.
   useEffect(() => {
     if (!engine) return
@@ -358,6 +348,7 @@ export default function Room({ id }) {
       else if (k === '-' || k === '_') engine.zoomBy(1 / 1.4)
       else if (k === 'c') engine.fit()
       else if (k === 'f' && canFullscreen()) toggleFullscreen()
+      else if (k === 'p') openPlayers.current?.()
       else return
       e.preventDefault()
     }
@@ -373,7 +364,7 @@ export default function Room({ id }) {
         <Rooms />
       </button>
       {engine && <Timers roomId={id} me={playerId} initial={data.times} busRef={timeBus} stopped={done} onTimes={onTimes} />}
-      <Settings privateRoom={!!data?.private} onHelp={() => setHelp(true)} />
+      <Settings privateRoom={!!data?.private} onHelp={() => setHelp(true)} escTaken={escTaken} />
     </>
   )
   const play = engine && (
@@ -454,7 +445,7 @@ export default function Room({ id }) {
       {play && <div className="play-tools tc">{play}</div>}
       {engine && (
         <div className="tr">
-          <Players stats={stats} times={times} me={playerId} owner={data?.owner} nameOf={nameOf} online={online} seen={seen} />
+          <Players stats={stats} times={times} me={playerId} owner={data?.owner} nameOf={nameOf} online={online} seen={seen} openRef={openPlayers} />
         </div>
       )}
       {menu && engine && <ContextMenu key={`${menu.kind}:${menu.id}:${menu.x}:${menu.y}`} engine={engine} at={menu} onClose={closeMenu} />}

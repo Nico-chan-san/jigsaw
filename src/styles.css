@@ -1714,6 +1714,10 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   animation: pop 0.14s ease;
   scrollbar-width: thin;
 }
+.players-menu.closing {
+  pointer-events: none;
+  animation: pop-out 0.16s ease forwards;
+}
 /* All players' time together, at the top of the list. */
 .players-total {
   display: flex;
@@ -2126,27 +2130,21 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   position: relative;
   display: inline-flex;
 }
-.float:has(.settings-menu) {
-  z-index: 6;
+.modal.settings-dialog {
+  width: min(360px, 100%);
 }
-.settings-menu {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: -4px;
+/* Sections of rows under small headings. The rows' icons line up with the title. */
+.settings-body {
+  gap: 16px;
+  margin-left: -8px;
+}
+.settings-section {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  width: 240px;
-  padding: 12px 6px 6px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--bg);
-  box-shadow: 0 8px 24px var(--shadow);
-  animation: pop 0.14s ease;
 }
-.settings-menu .label {
-  margin: 0;
-  padding: 0 8px 6px;
+.settings-section .label {
+  padding: 0 8px 4px;
 }
 .settings-row {
   display: flex;

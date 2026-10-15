@@ -95,8 +95,15 @@ function HoverCard({ p, here, seen, owner, me, at }) {
 // everyone, here now and away, and a circle or a name opens that player's window.
 // owner is the id of the player who made the jigsaw, online a Set of the player ids here now.
 // seen is when each player was last here (ms by id).
-export default function Players({ stats, times, me, owner, nameOf, online, seen = {} }) {
+export default function Players({ stats, times, me, owner, nameOf, online, seen = {}, openRef }) {
   const [open, setOpen] = useState(false)
+  const [menuShown, menuClosing] = useLinger(open)
+  // P opens and closes the list (see Room).
+  useEffect(() => {
+    if (!openRef) return
+    openRef.current = () => setOpen((o) => !o)
+    return () => (openRef.current = null)
+  }, [openRef])
   const [hover, setHover] = useState(null)
   const [profile, setProfile] = useState(null)
   const [profileShown, profileClosing] = useLinger(profile)
@@ -198,13 +205,15 @@ export default function Players({ stats, times, me, owner, nameOf, online, seen 
           onClick={() => setOpen((o) => !o)}
           aria-label="All players"
           aria-expanded={open}
+          aria-keyshortcuts="P"
           data-tip={`All players (${list.length})`}
+          data-key="P"
         >
           <Users />
         </button>
       )}
-      {open && (
-        <div className="players-menu">
+      {menuShown && (
+        <div className={`players-menu${menuClosing ? ' closing' : ''}`}>
           <p className="players-total" title="Time spent by all players together">
             <Clock />
             Total time {formatTime(list.reduce((t, p) => t + p.seconds, 0))}
