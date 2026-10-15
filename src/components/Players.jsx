@@ -4,7 +4,6 @@ import { formatTime, timeAgo } from '../lib/time.js'
 import { useLinger } from '../lib/linger.js'
 import { Clock, Crown, Piece, Users } from './icons.jsx'
 import PlayerDialog from './PlayerDialog.jsx'
-import AccountDialog from './AccountDialog.jsx'
 
 // At most this many circles in the header; everyone is in the menu behind the players button.
 const SHOWN = 5
@@ -94,8 +93,8 @@ function HoverCard({ p, here, seen, owner, me, at }) {
 // The players in the header: those here now as circles, by rank. The players button opens a list of
 // everyone, here now and away, and a circle or a name opens that player's window.
 // owner is the id of the player who made the jigsaw, online a Set of the player ids here now.
-// seen is when each player was last here (ms by id).
-export default function Players({ stats, times, me, owner, nameOf, online, seen = {}, openRef }) {
+// seen is when each player was last here (ms by id). onAccount opens your account (in the settings).
+export default function Players({ stats, times, me, owner, nameOf, online, seen = {}, openRef, onAccount }) {
   const [open, setOpen] = useState(false)
   const [menuShown, menuClosing] = useLinger(open)
   // P opens and closes the list (see Room).
@@ -109,13 +108,10 @@ export default function Players({ stats, times, me, owner, nameOf, online, seen 
   const [profileShown, profileClosing] = useLinger(profile)
   const closeProfile = useCallback(() => setProfile(null), [])
   // Your own window has a button to your account.
-  const [account, setAccount] = useState(false)
-  const [accountShown, accountClosing] = useLinger(account)
-  const closeAccount = useCallback(() => setAccount(false), [])
   const openAccount = useCallback(() => {
     setProfile(null)
-    setAccount(true)
-  }, [])
+    onAccount?.()
+  }, [onAccount])
   const wrap = useRef(null)
   const timer = useRef(0)
   const ranked = rankPlayers({ stats, times, nameOf })
@@ -286,7 +282,6 @@ export default function Players({ stats, times, me, owner, nameOf, online, seen 
           closing={profileClosing}
         />
       )}
-      {accountShown && <AccountDialog onClose={closeAccount} closing={accountClosing} />}
     </div>
   )
 }

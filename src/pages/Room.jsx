@@ -11,7 +11,6 @@ import {
   Check,
   Undo,
 } from '../components/icons.jsx'
-import Help from '../components/Help.jsx'
 import Settings from '../components/Settings.jsx'
 import Players, { rankPlayers } from '../components/Players.jsx'
 import Podium, { PodiumIcon } from '../components/Podium.jsx'
@@ -131,12 +130,13 @@ export default function Room({ id }) {
   // Player ids in the room right now, and when the others were last here (ms by id).
   const [online, setOnline] = useState(() => new Set())
   const [seen, setSeen] = useState({})
-  // Shown automatically the first time this player opens each jigsaw.
-  const [help, setHelp] = useState(() => !store.get(`help:${id}`))
-  const [helpShown, helpClosing] = useLinger(help)
-  const closeHelp = useCallback(() => {
+  const openSettings = useRef(null)
+  const openAccount = useCallback(() => openSettings.current?.('account'), [])
+  // How to play opens by itself the first time this player opens each jigsaw.
+  useEffect(() => {
+    if (store.get(`help:${id}`)) return
     store.set(`help:${id}`, '1')
-    setHelp(false)
+    openSettings.current?.('help')
   }, [id])
   const onTimes = useCallback((t) => setTimes(t), [])
   const notch = useNotch()
@@ -339,7 +339,7 @@ export default function Room({ id }) {
       const el = p && document.elementFromPoint(p[0] + r.left, p[1] + r.top)
       const over = el && !el.closest('.float, .players') ? p : null
       const k = e.key.toLowerCase()
-      if (k === 'h') setHelp(true)
+      if (k === 'h') openSettings.current?.('help')
       else if (k === 'v') setPanMode((v) => !v)
       else if (k === 'n') createNote.current?.(over ? over[0] + r.left : null, over ? over[1] + r.top : null)
       else if (k === 't') (over ? engine.addTray(...over) : engine.addTray())
@@ -364,7 +364,7 @@ export default function Room({ id }) {
         <Rooms />
       </button>
       {engine && <Timers roomId={id} me={playerId} initial={data.times} busRef={timeBus} stopped={done} onTimes={onTimes} />}
-      <Settings privateRoom={!!data?.private} onHelp={() => setHelp(true)} escTaken={escTaken} />
+      <Settings privateRoom={!!data?.private} help escTaken={escTaken} openRef={openSettings} />
     </>
   )
   const play = engine && (
@@ -445,11 +445,10 @@ export default function Room({ id }) {
       {play && <div className="play-tools tc">{play}</div>}
       {engine && (
         <div className="tr">
-          <Players stats={stats} times={times} me={playerId} owner={data?.owner} nameOf={nameOf} online={online} seen={seen} openRef={openPlayers} />
+          <Players stats={stats} times={times} me={playerId} owner={data?.owner} nameOf={nameOf} online={online} seen={seen} openRef={openPlayers} onAccount={openAccount} />
         </div>
       )}
       {menu && engine && <ContextMenu key={`${menu.kind}:${menu.id}:${menu.x}:${menu.y}`} engine={engine} at={menu} onClose={closeMenu} />}
-      {helpShown && <Help onClose={closeHelp} closing={helpClosing} />}
       {party && <Celebration key={partyKey} onDone={endParty} />}
       {import.meta.env.DEV && devMenu && engine && (
         <DevMenu

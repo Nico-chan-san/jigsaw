@@ -1943,11 +1943,8 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   text-align: center;
 }
 
-/* ---- help dialog ---- */
+/* ---- how to play (in the settings) ---- */
 
-.modal.help {
-  width: min(1040px, 100%);
-}
 /* ---- changelog ---- */
 
 .modal.changelog {
@@ -1983,23 +1980,23 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   color: inherit;
 }
 
-/* Two columns: mouse on the left, the longer keyboard list on the right. */
-.help-body {
+/* As many columns as fit in the panel. */
+.settings-panel.settings-help {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   align-content: start;
   gap: 20px 28px;
 }
-.help-body section {
+.settings-help section {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
-.help-body .help-touch {
+.settings-help .help-touch {
   grid-column: 1 / -1;
 }
 /* Keys in one column, what they do in the next, lined up across the section. */
-.help-body dl {
+.settings-help dl {
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: baseline;
@@ -2054,17 +2051,6 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   background: var(--field);
   font: 500 12px/1 ui-sans-serif, system-ui, -apple-system, sans-serif;
   white-space: nowrap;
-}
-
-@media (max-width: 900px) {
-  .help-body {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-@media (max-width: 640px) {
-  .help-body {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* ---- button hover cards (see Tooltips.jsx) ---- */
@@ -2131,13 +2117,64 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   display: inline-flex;
 }
 .modal.settings-dialog {
-  width: min(360px, 100%);
+  width: min(1000px, 100%);
+  height: min(680px, calc(100dvh - 32px - var(--notch)));
+  /* The side with the list of panels is greyer, from top to bottom, with a line along its edge:
+     the dialog's padding (24) and the list (200, from 8 to the left of it) and half the gap. */
+  background-image: linear-gradient(to right, var(--hover) 228px, var(--line) 228px 229px, transparent 229px);
 }
-/* Sections of rows under small headings. The rows' icons line up with the title. */
+/* The panels in a list down the side, the panel showing beside them, scrolling by itself. The
+   list's icons line up with the title. */
 .settings-body {
-  gap: 16px;
+  flex: 1;
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 24px;
   margin-left: -8px;
+  overflow: hidden;
 }
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-row.on {
+  background: var(--hover);
+  font-weight: 600;
+}
+.settings-row.on svg {
+  color: inherit;
+}
+.settings-panel {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-right: -8px;
+  padding-right: 8px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.settings-panel > * {
+  flex: none;
+}
+.settings-account {
+  gap: 24px;
+}
+/* One column, not the panel's whole width, so fields, buttons and notes line up. */
+.settings-account > * {
+  max-width: 380px;
+}
+.settings-account .secondary {
+  align-self: flex-start;
+}
+
+/* Panels of their own content line up with the title, not with the rows' icons. */
+.settings-account,
+.settings-help {
+  padding-left: 8px;
+}
+/* Sections of rows under small headings. */
 .settings-section {
   display: flex;
   flex-direction: column;
@@ -2145,6 +2182,28 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 }
 .settings-section .label {
   padding: 0 8px 4px;
+}
+/* On narrow screens the panels are tabs in a row above the panel. */
+@media (max-width: 640px) {
+  .modal.settings-dialog {
+    background-image: none;
+  }
+  .settings-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 16px;
+  }
+  .settings-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .settings-nav .settings-row {
+    flex: none;
+  }
+  .settings-nav .settings-key {
+    display: none;
+  }
 }
 .settings-row {
   display: flex;
@@ -2264,19 +2323,13 @@ button.link:hover {
   font-size: 13px;
 }
 
-/* ---- account dialog ---- */
+/* ---- account (in the settings) ---- */
 
-.modal.account {
-  width: min(440px, 100%);
-}
-.account-body {
-  gap: 24px;
-}
-.account-body .modal-text,
-.account-body .modal-error {
+.settings-account .modal-text,
+.settings-account .modal-error {
   margin: 0;
 }
-.account-body .secondary svg {
+.settings-account .secondary svg {
   width: 16px;
   height: 16px;
 }
@@ -2289,10 +2342,11 @@ button.link:hover {
 .qr-wrap {
   display: grid;
   place-items: center;
-  min-height: 200px;
+  width: 180px;
+  height: 180px;
 }
 .qr {
-  width: min(240px, 100%);
+  width: 100%;
   border-radius: 8px;
 }
 .settings-key {

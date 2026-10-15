@@ -45,7 +45,8 @@ export function Passphrase({ value }) {
 
 // Email and password fields with a submit button. onSubmit(email, password) rejects with the
 // reason it failed, which is shown under the fields. With create, the password is a new one.
-export function EmailForm({ action, create = false, onSubmit }) {
+// focus puts the cursor in the email field straight away.
+export function EmailForm({ action, create = false, focus = true, onSubmit }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
@@ -70,7 +71,7 @@ export function EmailForm({ action, create = false, onSubmit }) {
       <TextField
         bad={!!error}
         type="email"
-        autoFocus
+        autoFocus={focus}
         value={email}
         onChange={(e) => (setEmail(e.target.value), setError(''))}
         placeholder="Email"

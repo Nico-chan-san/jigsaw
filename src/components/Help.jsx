@@ -1,5 +1,3 @@
-import { useEffect } from 'react'
-import Dialog from './Dialog.jsx'
 
 const Key = ({ children }) => <kbd className="key">{children}</kbd>
 
@@ -91,7 +89,7 @@ const SECTIONS = [
       [<Key key="r">R</Key>, 'Reactions'],
       [<Key key="p">P</Key>, 'All players'],
       [<Key key="v">V</Key>, 'View mode'],
-      [<Key key="h">H</Key>, 'Help'],
+      [<Key key="h">H</Key>, 'How to play'],
       [<Either key="z" keys={['+', '-']} />, 'Zoom'],
       [<Key key="c">C</Key>, 'Fit to screen'],
       [<Key key="f">F</Key>, 'Fullscreen'],
@@ -111,41 +109,19 @@ const SECTIONS = [
 // Touch screens get the touch gestures, everything else the mouse and keyboard ones.
 const TOUCH = window.matchMedia('(hover: none)').matches
 
-export default function Help({ onClose, closing }) {
-  // H opens the help (see Room.jsx) and closes it again.
-  useEffect(() => {
-    if (closing) return
-    const key = (e) => {
-      if (e.key.toLowerCase() !== 'h' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
-      if (e.target?.closest?.('input, textarea, [contenteditable]')) return
-      e.preventDefault()
-      onClose()
-    }
-    window.addEventListener('keydown', key)
-    return () => window.removeEventListener('keydown', key)
-  }, [onClose, closing])
-
-  return (
-    <Dialog
-      title="How to play"
-      className="help"
-      bodyClass="help-body"
-      onClose={onClose}
-      closing={closing}
-    >
-      {SECTIONS.filter((s) => (s.title === 'Touch') === TOUCH).map((s) => (
-        <section key={s.title} className={`help-${s.title.toLowerCase()}`}>
-          <h2 className="label">{s.title}</h2>
-          <dl>
-            {s.rows.map(([k, text], i) => (
-              <div key={i} className="help-row">
-                <dt>{k}</dt>
-                <dd>{text}</dd>
-              </div>
-            ))}
-          </dl>
-        </section>
-      ))}
-    </Dialog>
-  )
+// The controls, in sections. Shown in the settings window (see Settings.jsx).
+export default function HelpPanel() {
+  return SECTIONS.filter((s) => (s.title === 'Touch') === TOUCH).map((s) => (
+    <section key={s.title} className={`help-${s.title.toLowerCase()}`}>
+      <h2 className="label">{s.title}</h2>
+      <dl>
+        {s.rows.map(([k, text], i) => (
+          <div key={i} className="help-row">
+            <dt>{k}</dt>
+            <dd>{text}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  ))
 }

@@ -2,8 +2,9 @@
 
 ## 15 October 2026
 
-- Settings open in a window in the middle of the screen instead of a dropdown, grouped into sections. Press **Esc** to open or close them, as long as Esc has nothing else to do, like clearing a selection or closing a menu.
-- **Log out** has moved out of the settings to the **Account** window.
+- Settings open in a window in the middle of the screen instead of a dropdown, with **General**, **Account** and **How to play** in a list down the side. **H** opens the window on How to play, and the first time you open a jigsaw it opens there by itself. Press **Esc** to open or close them, as long as Esc has nothing else to do, like clearing a selection or closing a menu.
+- **Log out** has moved to the **Account** panel in the settings, which your own player window's **Account** button now opens too.
+- The QR code under **Account** always logs you in on your phone. The switch to leave that out is gone.
 - Press **P** to open or close the list of all players.
 - Esc no longer leaves fullscreen when nothing is selected, since it opens the settings now. Hold it down to leave fullscreen, or press **F**.
 - Moving a piece or group by just a few pixels works again, for fine adjustments. Letting go after a tiny movement no longer puts it back where it was.
