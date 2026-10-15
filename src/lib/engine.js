@@ -3123,17 +3123,23 @@ export class Engine {
       t.h = S * TRAY_H
       return
     }
+    // Pieces someone is carrying, here or elsewhere, are left out: they stay in the tray until let go,
+    // but wherever they are held over isn't part of it. With all of them carried, the box stays put.
+    const carried = new Set(this.drag?.ids)
+    for (const d of this.remote.values()) for (const i of d.ids) carried.add(i)
     let x0 = Infinity
     let y0 = Infinity
     let x1 = -Infinity
     let y1 = -Infinity
     for (const i of t.pieces) {
+      if (carried.has(i)) continue
       const [x, y] = this.target(i)
       x0 = Math.min(x0, x)
       y0 = Math.min(y0, y)
       x1 = Math.max(x1, x)
       y1 = Math.max(y1, y)
     }
+    if (x0 === Infinity) return
     const pad = this.trayPad
     t.x = x0 - pad
     t.y = y0 - pad
